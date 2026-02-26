@@ -1,0 +1,280 @@
+---
+title: "Stream Playback"
+description: "Player setup, format fallback, and playback best practices"
+---
+
+# Stream Playback
+
+This guide covers how to set up video players for AGG stream URLs across different platforms.
+
+## Supported Formats
+
+AGG streams are available in three formats. Your player must support at least one:
+
+| Format | Extension | Protocol | Best For |
+|--------|-----------|----------|----------|
+| HLS | `.m3u8` | HTTP | Web, iOS, most platforms |
+| FLV | `.flv` | HTTP | Low-latency web streaming |
+| RTMP | `rtmp://` | RTMP | Desktop apps, OBS, legacy players |
+
+## Web: HLS.js (Recommended)
+
+[HLS.js](https://github.com/video-dev/hls.js) is the most widely used HLS player for web. It works in all modern browsers.
+
+```html
+<video id="video" controls></video>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+```
+
+```javascript
+import Hls from 'hls.js';
+
+function playHLS(url, videoElement) {
+  if (Hls.isSupported()) {
+    const hls = new Hls({
+      maxBufferLength: 30,
+      maxMaxBufferLength: 60,
+      liveSyncDurationCount: 3
+    });
+
+    hls.loadSource(url);
+    hls.attachMedia(videoElement);
+
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      videoElement.play();
+    });
+
+    hls.on(Hls.Events.ERROR, (event, data) => {
+      if (data.fatal) {
+        switch (data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            console.error('Network error — attempting recovery');
+            hls.startLoad();
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            console.error('Media error — attempting recovery');
+            hls.recoverMediaError();
+            break;
+          default:
+            console.error('Fatal error — destroying player');
+            hls.destroy();
+            break;
+        }
+      }
+    });
+
+    return hls;
+  } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+    // Safari has native HLS support
+    videoElement.src = url;
+    videoElement.play();
+    return null;
+  }
+}
+```
+
+## Web: flv.js
+
+[flv.js](https://github.com/bilibili/flv.js) handles FLV streams over HTTP. Use this for streams where the `format` field is `flv`.
+
+```javascript
+import flvjs from 'flv.js';
+
+function playFLV(url, videoElement) {
+  if (!flvjs.isSupported()) {
+    throw new Error('FLV.js is not supported in this browser');
+  }
+
+  const player = flvjs.createPlayer({
+    type: 'flv',
+    url: url,
+    isLive: true
+  }, {
+    enableStashBuffer: false,  // Lower latency
+    stashInitialSize: 128      // Smaller buffer for live
+  });
+
+  player.attachMediaElement(videoElement);
+  player.load();
+  player.play();
+
+  player.on(flvjs.Events.ERROR, (errorType, errorDetail) => {
+    console.error('FLV error:', errorType, errorDetail);
+    player.unload();
+    player.detachMediaElement();
+    player.destroy();
+  });
+
+  return player;
+}
+```
+
+## Android: ExoPlayer
+
+[ExoPlayer](https://github.com/google/ExoPlayer) handles both HLS and FLV on Android.
+
+```kotlin
+// build.gradle
+// implementation 'com.google.android.exoplayer:exoplayer:2.19.1'
+
+import com.google.android.exoplayer2.ExoPlayer
+import com.google.android.exoplayer2.MediaItem
+import com.google.android.exoplayer2.ui.StyledPlayerView
+
+fun playStream(url: String, playerView: StyledPlayerView) {
+    val player = ExoPlayer.Builder(playerView.context).build()
+    playerView.player = player
+
+    val mediaItem = MediaItem.fromUri(url)
+    player.setMediaItem(mediaItem)
+    player.prepare()
+    player.play()
+}
+```
+
+<Info>
+ExoPlayer auto-detects the stream format from the URL. It supports HLS (`.m3u8`), DASH, and progressive HTTP streams out of the box.
+</Info>
+
+## iOS: AVPlayer
+
+iOS has native HLS support via AVPlayer. No third-party library needed for `.m3u8` streams.
+
+```swift
+import AVKit
+
+func playStream(url: String, viewController: UIViewController) {
+    guard let streamURL = URL(string: url) else { return }
+
+    let player = AVPlayer(url: streamURL)
+    let playerViewController = AVPlayerViewController()
+    playerViewController.player = player
+
+    viewController.present(playerViewController, animated: true) {
+        player.play()
+    }
+}
+```
+
+<Warning>
+AVPlayer only supports HLS (`.m3u8`). For FLV or RTMP streams on iOS, you'll need a third-party library like [IJKPlayer](https://github.com/bilibili/ijkplayer) or [VLCKit](https://code.videolan.org/videolan/VLCKit).
+</Warning>
+
+## Format Fallback Chain
+
+When a match has multiple streams in different formats, implement a fallback chain to maximize playback success.
+
+```javascript
+const FORMAT_PRIORITY = ['m3u8', 'flv', 'rtmp'];
+
+async function playWithFallback(streams, videoElement) {
+  // Sort streams by format preference
+  const sorted = [...streams].sort((a, b) =>
+    FORMAT_PRIORITY.indexOf(a.format) - FORMAT_PRIORITY.indexOf(b.format)
+  );
+
+  for (const stream of sorted) {
+    try {
+      console.log(`Trying ${stream.format}: ${stream.url}`);
+      await attemptPlayback(stream, videoElement);
+      console.log(`Playing ${stream.format} stream successfully`);
+      return stream;
+    } catch (err) {
+      console.warn(`${stream.format} failed:`, err.message);
+    }
+  }
+
+  throw new Error('All stream formats failed');
+}
+
+function attemptPlayback(stream, video) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Playback timeout')), 10000);
+
+    try {
+      if (stream.format === 'm3u8') {
+        const hls = playHLS(stream.url, video);
+        video.onplaying = () => { clearTimeout(timeout); resolve(); };
+      } else if (stream.format === 'flv') {
+        const player = playFLV(stream.url, video);
+        video.onplaying = () => { clearTimeout(timeout); resolve(); };
+      } else {
+        clearTimeout(timeout);
+        reject(new Error(`No web player for ${stream.format}`));
+      }
+    } catch (err) {
+      clearTimeout(timeout);
+      reject(err);
+    }
+  });
+}
+```
+
+## Quality Selection
+
+When multiple streams of the same format but different qualities are available, let the user choose or auto-select based on connection speed.
+
+```javascript
+function selectQuality(streams, preferredQuality = '720p') {
+  const QUALITY_ORDER = ['1080p', '720p', '480p', 'SD'];
+
+  // Filter to preferred format first
+  const hlsStreams = streams.filter(s => s.format === 'm3u8');
+  if (hlsStreams.length === 0) return streams[0];
+
+  // Find preferred quality or fall back to next best
+  const preferredIndex = QUALITY_ORDER.indexOf(preferredQuality);
+  for (let i = preferredIndex; i < QUALITY_ORDER.length; i++) {
+    const match = hlsStreams.find(s => s.quality === QUALITY_ORDER[i]);
+    if (match) return match;
+  }
+
+  return hlsStreams[0]; // Default to first available
+}
+```
+
+## CORS Proxy for Web Playback
+
+Stream URLs from upstream providers may not include CORS headers, causing browser playback to fail. If you encounter CORS errors:
+
+**Option 1: Backend proxy (recommended)**
+
+Route stream requests through your own backend, which adds the necessary CORS headers.
+
+```javascript
+// Your backend endpoint
+app.get('/proxy/stream', async (req, res) => {
+  const streamUrl = req.query.url;
+  const response = await fetch(streamUrl);
+
+  res.set({
+    'Access-Control-Allow-Origin': '*',
+    'Content-Type': response.headers.get('content-type')
+  });
+
+  response.body.pipe(res);
+});
+
+// Frontend usage
+const proxiedUrl = `/proxy/stream?url=${encodeURIComponent(stream.url)}`;
+playHLS(proxiedUrl, videoElement);
+```
+
+**Option 2: Coordinate with AGG**
+
+Contact your account manager to discuss stream provider CORS policies. Some providers can whitelist your domain.
+
+<Warning>
+Do not use public CORS proxy services in production — they are unreliable, add latency, and may expose stream URLs to third parties.
+</Warning>
+
+## Stream Lifecycle
+
+| Phase | Timing | Action |
+|-------|--------|--------|
+| Pre-match | ~30 min before match start | Stream URLs become available via API |
+| Live | During match | URLs are stable — cache for 5 minutes |
+| Post-match | ~1 hour after end | URLs expire — playback will fail |
+| Expired | After expiry | 403/404 responses — must re-fetch |
+
+See [Streaming URLs](/streams) for the full stream URL documentation.

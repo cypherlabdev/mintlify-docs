@@ -1,0 +1,99 @@
+---
+title: "Get Match Lineups"
+description: "Retrieve starting lineups, bench players, and formation"
+api: "GET /matches/{id}/lineups"
+playground: "simple"
+---
+
+Retrieve the formation, coach, starting XI, and bench players for both teams in a specific match.
+
+<Info>
+This is a dedicated endpoint for lineups. It returns exactly the same `lineups` data as `GET /matches/{id}?include=lineups`, but without the core match fields.
+</Info>
+
+## Request
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  Unique match ID (e.g. `prov-60154495`)
+</ParamField>
+
+### Example Request
+
+```bash
+curl https://api.agg.example.com/v1/matches/prov-60154495/lineups \
+  -H "Authorization: Bearer <access_token>"
+```
+
+---
+
+## Response
+
+<ResponseField name="code" type="integer">
+  HTTP status code (`200`)
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  `"success"`
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Lineups data for home and away teams
+
+  <Expandable title="Team Lineup Object">
+    <ResponseField name="formation" type="string">
+      Formation (e.g. "4-2-3-1")
+    </ResponseField>
+    <ResponseField name="coach" type="string">
+      Coach name
+    </ResponseField>
+    <ResponseField name="starting" type="array">
+      Starting XI players
+      <Expandable title="Player Object">
+        <ResponseField name="player_id" type="string">Player ID</ResponseField>
+        <ResponseField name="name" type="string">Player name</ResponseField>
+        <ResponseField name="number" type="integer">Shirt number</ResponseField>
+        <ResponseField name="position" type="string">Position (G/D/M/F)</ResponseField>
+        <ResponseField name="photo" type="string">Player photo URL</ResponseField>
+        <ResponseField name="rating" type="number">Player rating</ResponseField>
+        <ResponseField name="is_captain" type="boolean">True if team captain</ResponseField>
+      </Expandable>
+    </ResponseField>
+    <ResponseField name="bench" type="array">
+      Bench players (same format as `starting`)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<RequestExample>
+```json Example Response
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "home": {
+      "formation": "4-2-3-1",
+      "coach": "O. Glasner",
+      "starting": [
+        {
+          "player_id": "12345",
+          "name": "D. Henderson",
+          "number": 1,
+          "position": "G",
+          "photo": "https://img.agg.example.com/player/12345.png",
+          "is_captain": false
+        }
+      ],
+      "bench": []
+    },
+    "away": {
+      "formation": "4-2-3-1",
+      "coach": "Marco Silva",
+      "starting": [],
+      "bench": []
+    }
+  }
+}
+```
+</RequestExample>

@@ -1,0 +1,138 @@
+---
+title: "Obtain Access Token"
+description: "HMAC-signed request to receive a JWT access token"
+api: "POST /auth/token"
+playground: "simple"
+---
+
+Authenticate using your merchant credentials with an HMAC-SHA256 signature to obtain a short-lived JWT access token. The token must be included as a `Bearer` token in the `Authorization` header of all subsequent API requests.
+
+<Note>
+This endpoint does **not** require a JWT token. Authentication is performed via the HMAC signature in the request body. Your `merchant_secret` is never sent — only the computed signature.
+</Note>
+
+---
+
+## Request
+
+```http
+POST /v1/auth/token
+Content-Type: application/json
+```
+
+### Request Body
+
+<ParamField body="merchant_code" type="string" required>
+  Your merchant code from the dashboard
+</ParamField>
+
+<ParamField body="timestamp" type="integer" required>
+  Current UNIX timestamp (seconds). Must be within 5 minutes of server time
+</ParamField>
+
+<ParamField body="nonce" type="string" required>
+  Random UUID to prevent replay attacks
+</ParamField>
+
+<ParamField body="signature" type="string" required>
+  HMAC-SHA256 signature of the canonical string
+</ParamField>
+
+### Building the Signature
+
+**Canonical string** (newline-separated, fixed format):
+
+```text
+merchant_code:{merchant_code}
+timestamp:{timestamp}
+nonce:{nonce}
+method:POST
+path:/v1/auth/token
+```
+
+**Signature:**
+
+```text
+HMAC-SHA256(merchant_secret, canonical_string) → hex encoded
+```
+
+### Example Request
+
+```bash
+MERCHANT_CODE="your-merchant-code"
+MERCHANT_SECRET="your-merchant-secret"
+TIMESTAMP=$(date +%s)
+NONCE=$(uuidgen | tr '[:upper:]' '[:lower:]')
+
+CANONICAL="merchant_code:${MERCHANT_CODE}
+timestamp:${TIMESTAMP}
+nonce:${NONCE}
+method:POST
+path:/v1/auth/token"
+
+SIGNATURE=$(echo -n "$CANONICAL" | openssl dgst -sha256 -hmac "$MERCHANT_SECRET" | awk '{print $2}')
+
+curl -X POST https://api.agg.example.com/v1/auth/token \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"merchant_code\": \"${MERCHANT_CODE}\",
+    \"timestamp\": ${TIMESTAMP},
+    \"nonce\": \"${NONCE}\",
+    \"signature\": \"${SIGNATURE}\"
+  }"
+```
+
+---
+
+## Response
+
+<ResponseField name="access_token" type="string">
+  JWT access token for `Authorization: Bearer <token>`
+</ResponseField>
+
+<ResponseField name="token_type" type="string">
+  Always `Bearer`
+</ResponseField>
+
+<ResponseField name="expires_in" type="integer">
+  Token lifetime in seconds (e.g. `3600` = 60 minutes)
+</ResponseField>
+
+<RequestExample>
+```json 200 Success
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "Bearer",
+  "expires_in": 3600
+}
+```
+
+```json 400 Bad Request
+{
+  "code": 400,
+  "message": "Missing required field: nonce"
+}
+```
+
+```json 401 Unauthorized
+{
+  "code": 401,
+  "message": "Invalid signature"
+}
+```
+</RequestExample>
+
+---
+
+## Token Usage
+
+Include the token in all subsequent requests:
+
+```bash
+curl https://api.agg.example.com/v1/sports \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+<Warning>
+Tokens expire after the duration specified in `expires_in`. Request a new token before the current one expires. There is no refresh endpoint — call `POST /auth/token` again.
+</Warning>

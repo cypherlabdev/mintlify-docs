@@ -1,0 +1,135 @@
+---
+title: "Match ID Strategy"
+description: "How AGG identifies and unifies matches across multiple providers"
+---
+
+# Match ID Strategy
+
+AGG aggregates match data from multiple upstream providers. Each provider uses its own internal match identifiers. This page explains how AGG unifies these into a consistent ID scheme for your application.
+
+## ID Fields
+
+Every match object contains two identifier fields:
+
+| Field | Format | Description | Example |
+|-------|--------|-------------|---------|
+| `id` | `{provider}-{match_id}` | AGG's **primary key** — prefixed with the provider source. Use this as the unique identifier in your application. | `"prov-60154495"` |
+| `match_id` | `{raw_id}` | The **raw provider match ID** without prefix. Useful for debugging or cross-referencing with the upstream provider. | `"60154495"` |
+
+<Info>
+Always use the `id` field as your primary key for storing and referencing matches. The `match_id` field is informational — it helps with provider-level debugging but is not guaranteed to be unique across providers.
+</Info>
+
+## Why Prefixed IDs?
+
+When AGG aggregates from multiple providers, raw match IDs can collide. Provider A and Provider B might both have a match with raw ID `12345` — but they refer to completely different matches.
+
+The prefixed `id` solves this:
+
+| Provider | Raw `match_id` | AGG `id` |
+|----------|---------------|----------|
+| ProvA | `60154495` | `prov-60154495` |
+| Provider B | `60154495` | `provb-60154495` |
+
+By using the prefixed `id`, your application never confuses matches from different providers.
+
+## Future: Core Match ID
+
+As AGG expands to aggregate the **same match** from multiple providers (for redundancy and data enrichment), a third identifier will be introduced:
+
+| Field | Purpose | Status |
+|-------|---------|--------|
+| `id` | Provider-scoped primary key | **Available now** |
+| `match_id` | Raw provider match ID | **Available now** |
+| `core_match_id` | AGG's unified ID linking the same real-world match across providers | **Planned** |
+
+### How `core_match_id` Will Work
+
+```
+Real-world match: Arsenal vs Chelsea, 2026-03-15
+
+  Provider ProvA   →  id: "prov-60154495"   match_id: "60154495"   core_match_id: "agg-m-1001"
+  Provider B      →  id: "provb-88231"      match_id: "88231"      core_match_id: "agg-m-1001"
+```
+
+Both provider entries will share the same `core_match_id`, allowing your application to:
+
+- **Deduplicate** the same match from multiple sources
+- **Merge** data (e.g., use ProvA for streams but Provider B for statistics)
+- **Failover** seamlessly if one provider goes down
+
+<Warning>
+`core_match_id` is not yet available in the API. When it is released, it will be added as a new field — this is a backwards-compatible change. Your existing integration using `id` will continue to work without modification.
+</Warning>
+
+## Fallback Strategy
+
+When `core_match_id` becomes available, implement this resolution order:
+
+```
+1. core_match_id  →  Use if available (best: unified across providers)
+2. id             →  Use as primary key (always available, provider-scoped)
+3. match_id       →  Use for debugging only (not globally unique)
+```
+
+### Recommended Client Implementation
+
+```javascript
+function getMatchKey(match) {
+  // Prefer core_match_id when available (future)
+  if (match.core_match_id) {
+    return match.core_match_id;
+  }
+  // Fall back to provider-scoped id (always available)
+  return match.id;
+}
+
+// Use for deduplication, caching, and state management
+const matchKey = getMatchKey(match);
+cache.set(matchKey, matchData);
+```
+
+## WebSocket and Match IDs
+
+WebSocket subscriptions use the `id` field (the prefixed version):
+
+```json
+{
+  "type": "subscribe",
+  "topic": "match:prov-60154495"
+}
+```
+
+Events on category topics (`matches:live`, `matches:league:{id}`, `matches:sport:{id}`) include the `match_id` field in each event so you can identify which match the event belongs to:
+
+```json
+{
+  "type": "score_update",
+  "match_id": "prov-60154495",
+  "home_score": 2,
+  "away_score": 1,
+  "timestamp": "2026-02-25T15:45:10Z"
+}
+```
+
+## Best Practices
+
+- **Use `id` as your primary key** — it is unique, stable, and provider-scoped
+- **Store `match_id` for reference** — useful for support tickets and provider-level debugging
+- **Prepare for `core_match_id`** — design your data model to accommodate a third identifier field
+- **Do not parse the prefix** — treat `id` as an opaque string. The prefix format may change when new providers are added
+- **Use `id` for WebSocket subscriptions** — always subscribe using the full prefixed ID
+
+## Related Pages
+
+<CardGroup cols={2}>
+  <Card title="List Matches" icon="list" href="/endpoints/list-matches">
+    Match list response with ID fields
+  </Card>
+  <Card title="Get Match Details" icon="magnifying-glass" href="/endpoints/get-match">
+    Match detail response with full data
+  </Card>
+  <Card title="WebSocket Subscriptions" icon="bell" href="/websocket-subscriptions">
+    How to subscribe using match IDs
+  </Card>
+</CardGroup>

@@ -1,0 +1,254 @@
+---
+title: "Getting Started"
+description: "Essential information for integrating with AGG APIs"
+---
+
+To interact with the AGG API and WebSocket services, use the following base URLs and environments.
+
+## First API Call in 5 Minutes
+
+<CodeGroup>
+
+```bash cURL
+# 1. Build canonical string and compute HMAC signature
+MERCHANT_CODE="YOUR_MERCHANT_CODE"
+MERCHANT_SECRET="YOUR_MERCHANT_SECRET"
+TIMESTAMP=$(date +%s)
+NONCE=$(uuidgen)
+
+CANONICAL="merchant_code:${MERCHANT_CODE}\ntimestamp:${TIMESTAMP}\nnonce:${NONCE}\nmethod:POST\npath:/v1/auth/token"
+SIGNATURE=$(printf "$CANONICAL" | openssl dgst -sha256 -hmac "$MERCHANT_SECRET" -hex | awk '{print $2}')
+
+# 2. Get access token
+TOKEN=$(curl -s -X POST https://staging-api.agg.example.com/v1/auth/token \
+  -H "Content-Type: application/json" \
+  -d "{\"merchant_code\":\"${MERCHANT_CODE}\",\"timestamp\":${TIMESTAMP},\"nonce\":\"${NONCE}\",\"signature\":\"${SIGNATURE}\"}" \
+  | jq -r '.access_token')
+
+# 3. Fetch live matches
+curl -s https://staging-api.agg.example.com/v1/matches?status=live \
+  -H "Authorization: Bearer $TOKEN" | jq
+```
+
+```javascript JavaScript
+import crypto from 'crypto';
+
+const merchantCode = 'YOUR_MERCHANT_CODE';
+const merchantSecret = 'YOUR_MERCHANT_SECRET';
+const timestamp = Math.floor(Date.now() / 1000);
+const nonce = crypto.randomUUID();
+
+// Build canonical string and compute HMAC signature
+const canonical = `merchant_code:${merchantCode}\ntimestamp:${timestamp}\nnonce:${nonce}\nmethod:POST\npath:/v1/auth/token`;
+const signature = crypto.createHmac('sha256', merchantSecret).update(canonical).digest('hex');
+
+// Get access token
+const res = await fetch('https://staging-api.agg.example.com/v1/auth/token', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ merchant_code: merchantCode, timestamp, nonce, signature })
+});
+const { access_token } = await res.json();
+
+// Fetch live matches
+const matches = await fetch('https://staging-api.agg.example.com/v1/matches?status=live', {
+  headers: { Authorization: `Bearer ${access_token}` }
+}).then(r => r.json());
+
+console.log(matches.data);
+```
+
+```python Python
+import hmac, hashlib, time, uuid, requests
+
+merchant_code = 'YOUR_MERCHANT_CODE'
+merchant_secret = 'YOUR_MERCHANT_SECRET'
+timestamp = int(time.time())
+nonce = str(uuid.uuid4())
+
+# Build canonical string and compute HMAC signature
+canonical = f"merchant_code:{merchant_code}\ntimestamp:{timestamp}\nnonce:{nonce}\nmethod:POST\npath:/v1/auth/token"
+signature = hmac.new(merchant_secret.encode(), canonical.encode(), hashlib.sha256).hexdigest()
+
+# Get access token
+token_res = requests.post('https://staging-api.agg.example.com/v1/auth/token', json={
+    'merchant_code': merchant_code,
+    'timestamp': timestamp,
+    'nonce': nonce,
+    'signature': signature
+})
+token = token_res.json()['access_token']
+
+# Fetch live matches
+matches = requests.get('https://staging-api.agg.example.com/v1/matches?status=live',
+    headers={'Authorization': f'Bearer {token}'}
+).json()
+
+print(matches['data'])
+```
+
+```go Go
+package main
+
+import (
+    "crypto/hmac"
+    "crypto/sha256"
+    "encoding/hex"
+    "encoding/json"
+    "fmt"
+    "net/http"
+    "strings"
+    "time"
+
+    "github.com/google/uuid"
+)
+
+func main() {
+    merchantCode := "YOUR_MERCHANT_CODE"
+    merchantSecret := "YOUR_MERCHANT_SECRET"
+    timestamp := fmt.Sprintf("%d", time.Now().Unix())
+    nonce := uuid.New().String()
+
+    // Build canonical string and compute HMAC signature
+    canonical := fmt.Sprintf("merchant_code:%s\ntimestamp:%s\nnonce:%s\nmethod:POST\npath:/v1/auth/token",
+        merchantCode, timestamp, nonce)
+    mac := hmac.New(sha256.New, []byte(merchantSecret))
+    mac.Write([]byte(canonical))
+    signature := hex.EncodeToString(mac.Sum(nil))
+
+    // Get access token
+    body := fmt.Sprintf(`{"merchant_code":"%s","timestamp":%s,"nonce":"%s","signature":"%s"}`,
+        merchantCode, timestamp, nonce, signature)
+    res, _ := http.Post("https://staging-api.agg.example.com/v1/auth/token",
+        "application/json", strings.NewReader(body))
+    var tokenRes map[string]interface{}
+    json.NewDecoder(res.Body).Decode(&tokenRes)
+    token := tokenRes["access_token"].(string)
+
+    // Fetch live matches
+    req, _ := http.NewRequest("GET", "https://staging-api.agg.example.com/v1/matches?status=live", nil)
+    req.Header.Set("Authorization", "Bearer "+token)
+    resp, _ := http.DefaultClient.Do(req)
+    var matches map[string]interface{}
+    json.NewDecoder(resp.Body).Decode(&matches)
+    fmt.Println(matches["data"])
+}
+```
+
+</CodeGroup>
+
+## Environment Setup Checklist
+
+1. Obtain your `merchant_code` and `merchant_secret` from the [Dashboard](https://dashboard.agg.example.com)
+2. Set environment variables:
+   ```bash
+   export AGG_MERCHANT_CODE="your-merchant-code"
+   export AGG_MERCHANT_SECRET="your-merchant-secret"
+   export AGG_BASE_URL="https://staging-api.agg.example.com/v1"
+   ```
+3. Test the connection by calling `POST /v1/auth/token` with an HMAC-signed request
+4. Verify you receive a valid `access_token` in the response
+
+## Base URLs
+
+<Tabs>
+<Tab title="Production">
+- **REST API:** `https://api.agg.example.com/v1`
+- **WebSocket:** `wss://ws.agg.example.com/ws`
+</Tab>
+<Tab title="Staging">
+- **REST API:** `https://staging-api.agg.example.com/v1`
+- **WebSocket:** `wss://staging-ws.agg.example.com/ws`
+</Tab>
+</Tabs>
+
+<Warning>
+Always develop and test against the **Staging** environment first. Production has stricter rate limits and uses live data.
+</Warning>
+
+### Staging vs Production
+
+| | Staging | Production |
+|---|---|---|
+| **Data** | Sample/delayed data | Live real-time data |
+| **Rate limits** | Relaxed | Strict (10 RPS) |
+| **Streams** | Test URLs (may not play) | Live stream URLs |
+| **Uptime SLA** | Best effort | 99.9% |
+
+## Content-Type
+
+All REST API requests and responses are encoded in JSON. Clients should ensure they send the correct `Content-Type` and `Accept` headers:
+
+```http
+Content-Type: application/json
+Accept: application/json
+```
+
+## Timezone
+
+All timestamps provided in API responses and WebSocket messages are in **UTC (ISO 8601)** format unless explicitly noted otherwise.
+
+Examples:
+- `2024-03-15T14:30:00Z`
+- `2024-03-15T14:30:00+00:00`
+
+Clients are responsible for localizing timestamps for user display based on the user's timezone.
+
+## Response Format
+
+A common response wrapper is implemented across all REST API endpoints. This standardizes the structure of the data and metadata returned.
+
+### Successful Response Example
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": { ... }
+}
+```
+
+### Paginated Response Example
+
+When querying lists, the response structure includes pagination metadata.
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [ ... ],
+  "meta": {
+    "page": 1,
+    "limit": 20,
+    "total": 150
+  }
+}
+```
+
+### Error Response Example
+
+Errors will return non-200 HTTP status codes, alongside a detailed JSON error body.
+
+```json
+{
+  "code": "400",
+  "message": "Invalid sport_id provided."
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="lock" href="/authentication">
+    HMAC authentication, scopes, and token management
+  </Card>
+  <Card title="Quickstart Tutorial" icon="bolt" href="/guides/quickstart">
+    Step-by-step guide to your first API call
+  </Card>
+  <Card title="REST API" icon="code" href="/rest-api">
+    Filtering, pagination, and endpoint overview
+  </Card>
+  <Card title="WebSocket API" icon="wifi" href="/websocket">
+    Real-time updates for live matches
+  </Card>
+</CardGroup>

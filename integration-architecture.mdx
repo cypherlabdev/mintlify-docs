@@ -1,0 +1,185 @@
+---
+title: "Integration Architecture"
+description: "How AGG fits into your application stack"
+---
+
+This page describes common integration patterns for connecting your application to AGG. Choose the pattern that best fits your platform and requirements.
+
+## Architecture Overview
+
+AGG provides two protocols for data access:
+- **REST API** — Request/response for data loading, filtering, and fetching stream URLs
+- **WebSocket API** — Persistent connection for real-time score, event, and stats updates
+
+Your integration pattern determines how your application components connect to these protocols.
+
+---
+
+## Pattern 1: Web Application (Backend Proxy)
+
+**Best for:** Web dashboards, sports portals, analytics platforms
+
+Your backend server handles authentication and proxies AGG data to the browser. This keeps credentials secure and lets you add caching.
+
+<Frame>
+```mermaid
+flowchart LR
+    Browser["Browser<br>(React, Vue, etc)"]
+    Backend["Your Backend<br>(Node, Python, Go)<br>+ Token Manager<br>+ Cache Layer"]
+    REST["AGG REST API"]
+    WS["AGG WebSocket"]
+
+    Browser -- "HTTP requests" --> Backend
+    Backend -- "cached responses" --> Browser
+    Backend -- "REST calls" --> REST
+    REST -- "JSON data" --> Backend
+    Backend -- "subscribe" --> WS
+    WS -- "real-time events" --> Backend
+    Backend -- "WebSocket / SSE" --> Browser
+```
+</Frame>
+
+<Steps>
+  <Step title="Authenticate">
+    Your backend authenticates with AGG (`POST /auth/token` via HMAC signature) and manages token lifecycle.
+  </Step>
+  <Step title="Request Data">
+    Browser requests data from your backend.
+  </Step>
+  <Step title="Fetch & Cache">
+    Your backend fetches from AGG REST API, caches responses, and returns to browser.
+  </Step>
+  <Step title="Real-time Stream">
+    For real-time: your backend connects to AGG WebSocket and forwards events to the browser via your own WebSocket or SSE.
+  </Step>
+</Steps>
+
+<Info>
+This pattern is recommended for most web applications. It keeps your AGG credentials on the server side and lets you control caching and rate limit usage.
+</Info>
+
+### Implementation Tips
+
+- Cache `/sports` and `/leagues` responses for 24 hours
+- Use a single AGG WebSocket connection and subscribe to `matches:live` for the dashboard, `match:{id}` for detail views
+- Forward only relevant events to each browser client to minimize bandwidth
+
+---
+
+## Pattern 2: Mobile Application (Direct)
+
+**Best for:** iOS/Android apps with a lightweight backend
+
+Mobile apps can connect directly to AGG for both REST and WebSocket, with your backend providing the JWT token.
+
+<Frame>
+```mermaid
+flowchart LR
+    App["Mobile App<br>(iOS / Android)"]
+    Backend["Your Backend<br>(Token issuer)"]
+    Auth["AGG /auth"]
+    REST["AGG REST API"]
+    WS["AGG WebSocket"]
+
+    App -- "request token" --> Backend
+    Backend -- "authenticate" --> Auth
+    Backend -- "JWT token" --> App
+    App -- "REST calls<br>(with token)" --> REST
+    REST -- "match data" --> App
+    App -- "subscribe" --> WS
+    WS -- "real-time events" --> App
+```
+</Frame>
+
+<Steps>
+  <Step title="Provide Token">
+    Your backend authenticates with AGG and provides the JWT token to the mobile app via a secure endpoint.
+  </Step>
+  <Step title="Direct REST Calls">
+    The mobile app uses the token to call AGG REST API directly.
+  </Step>
+  <Step title="Direct WebSocket Connection">
+    The mobile app connects to AGG WebSocket directly for real-time updates.
+  </Step>
+</Steps>
+
+<Warning>
+Never embed your `merchant_secret` in the mobile app. Always use your backend as a token broker — HMAC signing must happen server-side.
+</Warning>
+
+### Implementation Tips
+
+- Store the JWT token securely (Keychain on iOS, EncryptedSharedPreferences on Android)
+- Implement token refresh before expiry to avoid interruptions during live matches
+- Use a single WebSocket connection per app instance — subscribe to multiple channels on one connection
+
+---
+
+## Pattern 3: Backend-to-Backend
+
+**Best for:** Data pipelines, analytics engines, notification services
+
+Your server connects directly to AGG without any frontend involvement.
+
+<Frame>
+```mermaid
+flowchart LR
+    Service["Your Service<br>(Data pipeline,<br>notifications,<br>analytics engine)<br>+ Token Manager<br>+ Event Queue"]
+    REST["AGG REST API"]
+    WS["AGG WebSocket"]
+
+    Service -- "bulk data loading" --> REST
+    REST -- "JSON data" --> Service
+    Service -- "subscribe" --> WS
+    WS -- "real-time events" --> Service
+```
+</Frame>
+
+<Steps>
+  <Step title="Direct Authentication">
+    Your service authenticates directly with AGG.
+  </Step>
+  <Step title="Bulk Data Loading">
+    Use REST API for bulk data loading and historical queries.
+  </Step>
+  <Step title="Event Ingestion">
+    Use WebSocket for real-time event ingestion into your pipeline.
+  </Step>
+</Steps>
+
+### Implementation Tips
+
+- Implement connection pooling if monitoring many matches (up to 50 WebSocket connections per merchant)
+- Use an internal message queue (Redis, RabbitMQ, Kafka) to decouple AGG event ingestion from downstream processing
+- Monitor rate limits — backend services tend to make more API calls than frontend apps
+
+---
+
+## Choosing a Pattern
+
+| Factor | Backend Proxy | Mobile Direct | Backend-to-Backend |
+|--------|--------------|---------------|-------------------|
+| **Credential security** | Excellent — server only | Good — token broker | Excellent — server only |
+| **Caching** | Easy to add | Per-device only | Easy to add |
+| **WebSocket connections** | One per your server | One per device | Controlled by you |
+| **Rate limit usage** | Efficient (shared cache) | Per-device calls | Highest volume |
+| **Latency** | +1 hop (your backend) | Direct to AGG | Direct to AGG |
+| **Best for** | Web apps, portals | Mobile apps | Data pipelines |
+
+## Common Considerations
+
+### Token Management
+
+All patterns require token management. See [Authentication](/authentication#token-refresh-pattern) for the recommended pattern. Key points:
+
+- Tokens expire after 60 minutes
+- Re-authenticate via `POST /auth/token` before expiry (no refresh endpoint)
+- Never expose `merchant_secret` to end users — HMAC signing must happen server-side
+
+### Rate Limits
+
+Your rate limit budget is shared across all connections and patterns. If you have both a web backend and a mobile app calling AGG, they share the same merchant rate limit. See [Rate Limits](/rate-limits) for details.
+
+### Failover
+
+For production applications, implement fallback from WebSocket to REST polling. See [WebSocket Overview](/websocket#rest-polling-fallback) for the recommended approach.

@@ -1,0 +1,1267 @@
+openapi: 3.0.3
+info:
+  title: AGG Aggregator Platform API
+  description: |
+    AGG is a specialized sports data aggregation platform that unifies match data, live scores, statistics, and streaming URLs from multiple upstream providers into a single, cohesive interface.
+
+    ## Overview
+    - **Sports & Leagues** — Browse available sports and leagues
+    - **Matches** — List, filter, and paginate matches by sport, league, status, or date
+    - **Match Details** — Scores, incidents (goals, cards, substitutions), and embedded streams
+    - **Statistics** — Possession, shots, corners, fouls broken down by home/away
+    - **Streaming URLs** — m3u8, flv, and rtmp stream URLs from upstream providers
+
+    ## Authentication
+    All endpoints (except `/auth/token`) require a valid JWT Bearer token. Obtain one via `POST /auth/token` using your client credentials.
+
+    ## Response Format
+    All responses are wrapped in a standard envelope:
+    ```json
+    { "code": 200, "message": "success", "data": { ... }, "meta": { ... } }
+    ```
+  version: 1.0.0
+
+servers:
+  - url: https://api.agg.example.com/v1
+    description: Production Environment
+  - url: https://staging-api.agg.example.com/v1
+    description: Staging Environment
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "JWT access token obtained from POST /auth/token. Include as Authorization: Bearer <token>."
+
+  schemas:
+    ErrorResponse:
+      type: object
+      description: Standard error response returned for all non-2xx status codes.
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: integer
+          description: HTTP status code or application-specific error code.
+          example: 400
+        message:
+          type: string
+          description: Human-readable error description.
+          example: "Invalid sport_id: 'abc'. Must be a string."
+
+    PaginationMeta:
+      type: object
+      description: Pagination metadata included in list responses.
+      required:
+        - page
+        - limit
+        - total
+      properties:
+        page:
+          type: integer
+          description: Current page number (1-indexed).
+          example: 1
+        limit:
+          type: integer
+          description: Number of items per page.
+          example: 20
+        total:
+          type: integer
+          description: Total number of items across all pages.
+          example: 150
+
+    Sport:
+      type: object
+      description: Represents a sport available on the AGG platform.
+      required:
+        - sport_id
+        - sport_name
+      properties:
+        sport_id:
+          type: string
+          description: Unique identifier for the sport.
+          example: "1"
+        sport_name:
+          type: string
+          description: Display name of the sport.
+          example: "Football"
+
+    League:
+      type: object
+      description: Represents a league within a sport (e.g. Premier League under Football).
+      required:
+        - league_id
+        - league_name
+        - sport_id
+        - sport_name
+      properties:
+        league_id:
+          type: string
+          description: Unique identifier for the league.
+          example: "39"
+        league_name:
+          type: string
+          description: Display name of the league.
+          example: "Premier League"
+        sport_id:
+          type: string
+          description: ID of the sport this league belongs to. Use this to cross-reference with `/sports`.
+          example: "1"
+        sport_name:
+          type: string
+          description: Name of the sport this league belongs to.
+          example: "Football"
+
+    MatchListItem:
+      type: object
+      description: Summary of a match for list views. Contains scores, status, and availability flags but not full details like streams or incidents.
+      required:
+        - id
+        - sport_id
+        - league_id
+        - home_team
+        - away_team
+        - status
+        - start_time
+      properties:
+        id:
+          type: string
+          description: Unique match identifier (provider-prefixed). Use this to fetch details, events, statistics, or streams.
+          example: "prov-60154495"
+        match_id:
+          type: string
+          description: Raw match ID from the upstream provider.
+          example: "60154495"
+        sport_id:
+          type: string
+          description: ID of the sport this match belongs to.
+          example: "1"
+        sport_name:
+          type: string
+          description: Name of the sport.
+          example: "Football"
+        league_id:
+          type: string
+          description: ID of the league this match belongs to.
+          example: "39"
+        league_name:
+          type: string
+          description: Name of the league.
+          example: "Premier League"
+        home_team:
+          type: string
+          description: Name of the home team.
+          example: "Arsenal"
+        away_team:
+          type: string
+          description: Name of the away team.
+          example: "Chelsea"
+        home_logo:
+          type: string
+          description: URL to the home team logo.
+          example: "https://img.agg.example.com/team/arsenal.png"
+        away_logo:
+          type: string
+          description: URL to the away team logo.
+          example: "https://img.agg.example.com/team/chelsea.png"
+        home_score:
+          type: integer
+          description: Current score of the home team. `0` before the match starts.
+          example: 2
+        away_score:
+          type: integer
+          description: Current score of the away team. `0` before the match starts.
+          example: 1
+        game_stage:
+          type: string
+          description: Current phase of the match. Only meaningful when `status` is `live`.
+          enum:
+            - 1H
+            - HT
+            - 2H
+            - ET
+            - PEN
+            - FT
+          example: "2H"
+        status:
+          type: string
+          description: Current match status.
+          enum:
+            - scheduled
+            - live
+            - halftime
+            - completed
+            - postponed
+            - cancelled
+          example: "live"
+        is_live:
+          type: boolean
+          description: "`true` if the match is currently in progress. Convenience field equivalent to `status == 'live'`."
+          example: true
+        start_time:
+          type: string
+          format: date-time
+          description: Scheduled start time in UTC (ISO 8601). The match may start slightly before or after this time.
+          example: "2024-03-15T14:30:00Z"
+        has_stream:
+          type: boolean
+          description: "`true` if at least one streaming URL is available for this match. Use `GET /matches/{id}?include=streams` to fetch URLs."
+          example: true
+
+    Stream:
+      type: object
+      description: A streaming URL for match video. AGG aggregates URLs from upstream providers.
+      required:
+        - match_id
+        - m3u8_url
+      properties:
+        match_id:
+          type: string
+          description: Match identifier this stream belongs to.
+          example: "60154495"
+        tag:
+          type: string
+          description: Stream source tag identifier.
+          example: "stream-alpha"
+        vid:
+          type: string
+          description: Unique video stream identifier.
+          example: "vid-60154495-streamNa-ali"
+        quality_id:
+          type: integer
+          description: Quality tier identifier.
+          example: 1
+        language_id:
+          type: integer
+          description: Language identifier.
+          example: 2
+        resolution:
+          type: string
+          description: Video resolution.
+          example: "1920x1080"
+        preview_url:
+          type: string
+          description: Preview thumbnail URL.
+          example: "https://preview.example.com/60154495.jpg"
+        m3u8_url:
+          type: string
+          description: HLS stream URL. Use with HLS.js (web) or native player (mobile).
+          example: "https://stream.example.com/live/60154495.m3u8"
+        flv_url:
+          type: string
+          description: FLV stream URL. Use with flv.js for low-latency playback.
+          example: "https://stream.example.com/live/60154495.flv"
+        rtmp_url:
+          type: string
+          description: RTMP stream URL. For desktop/legacy players.
+          example: "rtmp://stream.example.com/live/60154495"
+        has_video:
+          type: boolean
+          description: Whether the stream includes a video track.
+          example: true
+        has_audio:
+          type: boolean
+          description: Whether the stream includes an audio track.
+          example: true
+        is_live:
+          type: boolean
+          description: Whether the stream is currently broadcasting.
+          example: true
+        signal_on:
+          type: boolean
+          description: Whether the stream signal is active.
+          example: true
+
+    Incident:
+      type: object
+      description: A match event (incident) such as a goal, card, or substitution. Returned in chronological order.
+      required:
+        - type
+        - minute
+        - team
+      properties:
+        type:
+          type: string
+          description: The type of incident.
+          enum:
+            - goal
+            - own_goal
+            - yellow_card
+            - red_card
+            - substitution
+            - var_decision
+            - penalty
+          example: "goal"
+        minute:
+          type: integer
+          description: Match minute when the incident occurred.
+          example: 12
+        second:
+          type: integer
+          description: Second within the minute (0-59).
+          example: 34
+        team:
+          type: string
+          description: Which team the incident belongs to.
+          enum:
+            - home
+            - away
+          example: "home"
+        player_name:
+          type: string
+          description: Name of the primary player involved.
+          example: "Eberechi Eze"
+        player_in:
+          type: string
+          description: Player coming on (substitution only).
+          example: "L. Trossard"
+        player_out:
+          type: string
+          description: Player going off (substitution only).
+          example: "G. Martinelli"
+        var_reason:
+          type: string
+          description: Reason for VAR review.
+          example: "Possible handball"
+        var_result:
+          type: string
+          description: Result of the VAR review.
+          example: "Goal disallowed"
+        score_snapshot:
+          type: object
+          description: Score at the time of this incident.
+          properties:
+            home:
+              type: integer
+              example: 1
+            away:
+              type: integer
+              example: 0
+
+    Player:
+      type: object
+      description: A player in the lineup.
+      properties:
+        player_id:
+          type: string
+          example: "103"
+        name:
+          type: string
+          example: "Marc Guehi"
+        number:
+          type: integer
+          example: 6
+        position:
+          type: string
+          description: "Position code: G (Goalkeeper), D (Defender), M (Midfielder), F (Forward)."
+          example: "D"
+        photo:
+          type: string
+          example: "https://img.agg.example.com/player/103.png"
+        rating:
+          type: number
+          format: float
+          example: 7.4
+        is_captain:
+          type: boolean
+          example: true
+
+    TeamLineup:
+      type: object
+      description: Lineup for one team.
+      properties:
+        formation:
+          type: string
+          example: "4-3-3"
+        coach:
+          type: string
+          example: "Oliver Glasner"
+        starting:
+          type: array
+          items:
+            $ref: '#/components/schemas/Player'
+        bench:
+          type: array
+          items:
+            $ref: '#/components/schemas/Player'
+
+    Lineups:
+      type: object
+      description: Lineups for both teams including formation, starting XI, bench, and coach.
+      properties:
+        home:
+          $ref: '#/components/schemas/TeamLineup'
+        away:
+          $ref: '#/components/schemas/TeamLineup'
+
+    Weather:
+      type: object
+      description: Weather conditions at the venue at match time.
+      properties:
+        condition:
+          type: string
+          example: "Cloudy"
+        temperature:
+          type: integer
+          description: Temperature in Celsius.
+          example: 15
+        humidity:
+          type: integer
+          description: Humidity percentage.
+          example: 72
+        wind_speed:
+          type: integer
+          description: Wind speed in km/h.
+          example: 12
+        wind_direction:
+          type: string
+          example: "NW"
+        pressure:
+          type: integer
+          description: Atmospheric pressure in hPa.
+          example: 1013
+
+    H2HMatch:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+          example: "2025-11-02"
+        home_team:
+          type: string
+          example: "Fulham"
+        away_team:
+          type: string
+          example: "Crystal Palace"
+        home_score:
+          type: integer
+          example: 1
+        away_score:
+          type: integer
+          example: 1
+
+    InjuryReport:
+      type: object
+      properties:
+        player_name:
+          type: string
+          example: "Nathan Ferguson"
+        type:
+          type: string
+          example: "ACL"
+        return_date:
+          type: string
+          format: date
+          example: "2026-05-01"
+
+    Insights:
+      type: object
+      description: Pre-match insights including H2H record, form guide, league rankings, and injury reports.
+      properties:
+        home_rank:
+          type: integer
+          example: 12
+        away_rank:
+          type: integer
+          example: 9
+        home_form:
+          type: array
+          description: "Last 5 results for home team (W/D/L)."
+          items:
+            type: string
+          example: ["W", "W", "D", "L", "W"]
+        away_form:
+          type: array
+          description: "Last 5 results for away team (W/D/L)."
+          items:
+            type: string
+          example: ["L", "W", "W", "D", "W"]
+        h2h:
+          type: array
+          description: Last 5 head-to-head matches.
+          items:
+            $ref: '#/components/schemas/H2HMatch'
+        home_injuries:
+          type: array
+          items:
+            $ref: '#/components/schemas/InjuryReport'
+        away_injuries:
+          type: array
+          items:
+            $ref: '#/components/schemas/InjuryReport'
+
+    MatchDetail:
+      description: "Full match details. Use the `include` query parameter to selectively load sections. Without `include`, all sections are returned."
+      type: object
+      required:
+        - id
+        - match_id
+        - sport_id
+        - home_team
+        - away_team
+        - status
+        - start_time
+      properties:
+        id:
+          type: string
+          description: Unique match identifier (provider-prefixed).
+          example: "prov-60154495"
+        match_id:
+          type: string
+          description: Raw match ID.
+          example: "60154495"
+        sport_id:
+          type: string
+          example: "1"
+        sport_name:
+          type: string
+          example: "Football"
+        league_id:
+          type: string
+          example: "11997"
+        league_name:
+          type: string
+          example: "Premier League"
+        home_team:
+          type: string
+          example: "Crystal Palace"
+        away_team:
+          type: string
+          example: "Fulham"
+        home_logo:
+          type: string
+          description: URL to the home team logo.
+          example: "https://img.agg.example.com/team/crystal-palace.png"
+        away_logo:
+          type: string
+          description: URL to the away team logo.
+          example: "https://img.agg.example.com/team/fulham.png"
+        home_score:
+          type: integer
+          nullable: true
+          example: 2
+        away_score:
+          type: integer
+          nullable: true
+          example: 1
+        status:
+          type: string
+          example: "completed"
+        is_live:
+          type: boolean
+          example: false
+        start_time:
+          type: string
+          format: date-time
+          example: "2026-02-18T15:00:00Z"
+        venue_name:
+          type: string
+          nullable: true
+          example: "Selhurst Park"
+        game_stage:
+          type: string
+          example: "Full-time"
+        round:
+          type: integer
+          nullable: true
+          example: 28
+        round_type:
+          type: string
+          nullable: true
+          example: "League"
+        streams:
+          type: array
+          description: "Included when `include` contains `streams` or when no `include` param is provided."
+          items:
+            $ref: '#/components/schemas/Stream'
+        incidents:
+          type: array
+          description: "Included when `include` contains `incidents` or when no `include` param is provided."
+          items:
+            $ref: '#/components/schemas/Incident'
+        statistics:
+          description: "Included when `include` contains `statistics` or when no `include` param is provided."
+          $ref: '#/components/schemas/Statistics'
+        lineups:
+          description: "Included when `include` contains `lineups` or when no `include` param is provided."
+          $ref: '#/components/schemas/Lineups'
+        weather:
+          description: "Included when `include` contains `weather` or when no `include` param is provided."
+          $ref: '#/components/schemas/Weather'
+        insights:
+          description: "Included when `include` contains `insights` or when no `include` param is provided."
+          $ref: '#/components/schemas/Insights'
+
+    HomeAwayStat:
+      type: object
+      description: A statistic broken down by home and away team.
+      required:
+        - home
+        - away
+      properties:
+        home:
+          type: integer
+          description: Value for the home team.
+        away:
+          type: integer
+          description: Value for the away team.
+
+    Statistics:
+      type: object
+      description: Match statistics broken down by home and away team.
+      properties:
+        possession:
+          allOf:
+            - $ref: '#/components/schemas/HomeAwayStat'
+          description: Ball possession percentage (home + away = 100).
+          example:
+            home: 58
+            away: 42
+        shots_on_target:
+          allOf:
+            - $ref: '#/components/schemas/HomeAwayStat'
+          description: Number of shots on target.
+          example:
+            home: 6
+            away: 3
+        shots_off_target:
+          allOf:
+            - $ref: '#/components/schemas/HomeAwayStat'
+          description: Number of shots off target.
+          example:
+            home: 4
+            away: 5
+        corners:
+          allOf:
+            - $ref: '#/components/schemas/HomeAwayStat'
+          description: Number of corner kicks.
+          example:
+            home: 5
+            away: 2
+        yellow_cards:
+          allOf:
+            - $ref: '#/components/schemas/HomeAwayStat'
+          description: Yellow cards shown.
+          example:
+            home: 0
+            away: 1
+        red_cards:
+          allOf:
+            - $ref: '#/components/schemas/HomeAwayStat'
+          description: Red cards shown.
+          example:
+            home: 0
+            away: 1
+        dangerous_attacks:
+          allOf:
+            - $ref: '#/components/schemas/HomeAwayStat'
+          description: Number of dangerous attacks.
+          example:
+            home: 14
+            away: 8
+        fouls:
+          allOf:
+            - $ref: '#/components/schemas/HomeAwayStat'
+          description: Number of fouls committed.
+          example:
+            home: 12
+            away: 14
+        offsides:
+          allOf:
+            - $ref: '#/components/schemas/HomeAwayStat'
+          description: Number of offsides.
+          example:
+            home: 2
+            away: 3
+        attacks:
+          allOf:
+            - $ref: '#/components/schemas/HomeAwayStat'
+          description: Total attacks.
+          example:
+            home: 45
+            away: 38
+        free_kicks:
+          allOf:
+            - $ref: '#/components/schemas/HomeAwayStat'
+          description: Number of free kicks.
+          example:
+            home: 15
+            away: 12
+
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/token:
+    post:
+      tags:
+        - Authentication
+      summary: Obtain Access Token
+      description: |
+        Authenticate using HMAC-SHA256 signature authentication to receive a JWT access token. This token must be included as a `Bearer` token in the `Authorization` header for all other API requests.
+
+        **How it works:** Build a canonical string from your merchant code, timestamp, nonce, HTTP method, and path. Sign it with your `merchant_secret` using HMAC-SHA256. Send the signature (not the secret) in the request body.
+
+        **Token lifetime:** Tokens expire after the duration specified in `expires_in` (default: 3600 seconds / 1 hour). Refresh the token before expiry to avoid request failures.
+
+        **No authentication required** for this endpoint.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - merchant_code
+                - timestamp
+                - nonce
+                - signature
+              properties:
+                merchant_code:
+                  type: string
+                  description: Your merchant code from the dashboard.
+                  example: "your-merchant-code"
+                timestamp:
+                  type: integer
+                  description: Current UNIX timestamp in seconds. Must be within 5 minutes of server time.
+                  example: 1708876800
+                nonce:
+                  type: string
+                  description: Random UUID to prevent replay attacks. Each request must use a unique nonce.
+                  example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                signature:
+                  type: string
+                  description: "HMAC-SHA256 signature of the canonical string: `merchant_code:{merchant_code}\\ntimestamp:{timestamp}\\nnonce:{nonce}\\nmethod:POST\\npath:/v1/auth/token`, signed with your `merchant_secret` and hex-encoded. **Never send your merchant_secret directly.**"
+                  example: "a3f5b7c9d1e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b4c6d8e0f2"
+            example:
+              merchant_code: "your-merchant-code"
+              timestamp: 1708876800
+              nonce: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+              signature: "a3f5b7c9d1e2f4a6b8c0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b4c6d8e0f2"
+      responses:
+        '200':
+          description: Authentication successful. Use the `access_token` in subsequent requests.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - access_token
+                  - token_type
+                  - expires_in
+                properties:
+                  access_token:
+                    type: string
+                    description: "JWT access token. Include this in the Authorization: Bearer <token> header."
+                    example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  token_type:
+                    type: string
+                    description: Token type. Always `Bearer`.
+                    example: "Bearer"
+                  expires_in:
+                    type: integer
+                    description: Token lifetime in seconds from time of issue.
+                    example: 3600
+                  scope:
+                    type: string
+                    description: Space-separated list of granted permissions. Depends on your subscription tier.
+                    example: "read:matches read:streams read:sports read:leagues"
+              example:
+                access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                token_type: "Bearer"
+                expires_in: 3600
+                scope: "read:matches read:streams read:sports read:leagues"
+        '400':
+          description: Invalid request — missing or malformed parameters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: 400
+                message: "Missing required field: nonce"
+        '401':
+          description: Invalid signature, expired timestamp, or unknown merchant code.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: 401
+                message: "Invalid signature"
+
+  /sports:
+    get:
+      tags:
+        - Sports & Leagues
+      summary: List Sports
+      description: |
+        Retrieve all sports available on the AGG platform. The sports list rarely changes — **cache this response for up to 24 hours** to reduce API calls.
+
+        Use the returned `sport_id` values to filter leagues (`GET /leagues?sport_id=X`) and matches (`GET /matches?sport_id=X`).
+      responses:
+        '200':
+          description: A list of all available sports.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    description: HTTP status code.
+                    example: 200
+                  message:
+                    type: string
+                    description: Response status message.
+                    example: "success"
+                  data:
+                    type: array
+                    description: Array of sport objects.
+                    items:
+                      $ref: '#/components/schemas/Sport'
+              example:
+                code: 200
+                message: "success"
+                data:
+                  - sport_id: "1"
+                    sport_name: "Football"
+        '401':
+          description: Missing or invalid Bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: 401
+                message: "Token expired at 2024-03-15T12:00:00Z."
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: 429
+                message: "Rate limit exceeded. Please wait 1 seconds."
+
+  /leagues:
+    get:
+      tags:
+        - Sports & Leagues
+      summary: List Leagues
+      description: |
+        Retrieve leagues, optionally filtered by sport. Like sports, leagues rarely change — **cache for up to 24 hours**.
+
+        Use the returned `league_id` values to filter matches (`GET /matches?league_id=X`).
+      parameters:
+        - in: query
+          name: sport_id
+          schema:
+            type: string
+          description: Filter leagues by sport ID. Omit to return leagues across all sports.
+          example: "1"
+      responses:
+        '200':
+          description: A list of leagues.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: "success"
+                  data:
+                    type: array
+                    description: Array of league objects. Filtered by `sport_id` if provided.
+                    items:
+                      $ref: '#/components/schemas/League'
+              example:
+                code: 200
+                message: "success"
+                data:
+                  - league_id: "39"
+                    league_name: "Premier League"
+                    sport_id: "1"
+                    sport_name: "Football"
+                  - league_id: "140"
+                    league_name: "La Liga"
+                    sport_id: "1"
+                    sport_name: "Football"
+        '401':
+          description: Missing or invalid Bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: 401
+                message: "Invalid or expired token."
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: 429
+                message: "Rate limit exceeded. Please wait 1 seconds."
+
+  /matches:
+    get:
+      tags:
+        - Matches
+      summary: List Matches
+      description: |
+        Retrieve a paginated list of matches. Supports filtering by sport, league, status, and date.
+
+        **Common patterns:**
+        - Live dashboard: `GET /matches?status=live`
+        - Upcoming matches: `GET /matches?status=scheduled&date=2024-03-16`
+        - Sport-specific: `GET /matches?sport_id=1&status=live`
+        - Combined filters: `GET /matches?sport_id=1&league_id=39&status=live`
+
+        **Caching:** Do not cache `status=live` results — use WebSocket for real-time updates. Cache `status=scheduled` for up to 5 minutes.
+      parameters:
+        - in: query
+          name: sport_id
+          schema:
+            type: string
+          description: Filter matches by sport ID. Get valid IDs from `GET /sports`.
+          example: "1"
+        - in: query
+          name: league_id
+          schema:
+            type: string
+          description: Filter matches by league ID. Get valid IDs from `GET /leagues`.
+          example: "39"
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum:
+              - live
+              - scheduled
+              - completed
+              - halftime
+              - postponed
+              - cancelled
+          description: Filter matches by current status.
+          example: "live"
+        - in: query
+          name: date
+          schema:
+            type: string
+            format: date
+          description: Filter matches by date in `YYYY-MM-DD` format (UTC).
+          example: "2024-03-15"
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+          description: Page number for pagination (1-indexed).
+          example: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+          description: Number of items per page. Maximum `100`.
+          example: 20
+        - in: query
+          name: sort
+          schema:
+            type: string
+          description: Sort field. Prefix with `-` for descending order (e.g. `-start_time`).
+          example: "-start_time"
+      responses:
+        '200':
+          description: A paginated list of matches.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: "success"
+                  data:
+                    type: array
+                    description: Array of match summary objects.
+                    items:
+                      $ref: '#/components/schemas/MatchListItem'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+              example:
+                code: 200
+                message: "success"
+                data:
+                  - id: "prov-60154495"
+                    match_id: "60154495"
+                    sport_id: "1"
+                    sport_name: "Football"
+                    league_id: "39"
+                    league_name: "Premier League"
+                    home_team: "Arsenal"
+                    away_team: "Chelsea"
+                    home_logo: "https://img.agg.example.com/team/arsenal.png"
+                    away_logo: "https://img.agg.example.com/team/chelsea.png"
+                    home_score: 2
+                    away_score: 1
+                    game_stage: "2H"
+                    status: "live"
+                    is_live: true
+                    start_time: "2024-03-15T14:30:00Z"
+                    has_stream: true
+                meta:
+                  page: 1
+                  limit: 20
+                  total: 150
+        '400':
+          description: Invalid query parameters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: 400
+                message: "Invalid status value: 'playing'. Allowed: live, scheduled, completed, halftime, postponed, cancelled."
+        '401':
+          description: Missing or invalid Bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: 401
+                message: "Invalid or expired token."
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: 429
+                message: "Rate limit exceeded. Please wait 1 seconds."
+
+  /matches/{id}:
+    get:
+      tags:
+        - Matches
+      summary: Get Match Details
+      description: |
+        Retrieve details for a specific match. Supports two modes:
+
+        **Mode 1 — Full (default):** Returns all sections. No `include` parameter needed.
+
+        **Mode 2 — Selective:** Pass `include` with comma-separated section names to return only the requested sections. Omitted sections are excluded entirely (not `null`).
+
+        **Available sections:** `streams`, `incidents`, `statistics`, `lineups`, `weather`, `insights`
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Unique match ID (e.g. `prov-60154495`).
+          example: "prov-60154495"
+        - in: query
+          name: include
+          schema:
+            type: string
+          description: "Comma-separated list of sections to include. Omit to return all sections. Values: `streams`, `incidents`, `statistics`, `lineups`, `weather`, `insights`."
+          example: "statistics,incidents"
+      responses:
+        '200':
+          description: Match details with requested sections.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: "success"
+                  data:
+                    $ref: '#/components/schemas/MatchDetail'
+              example:
+                code: 200
+                message: "success"
+                data:
+                  id: "prov-60154495"
+                  match_id: "60154495"
+                  sport_id: "1"
+                  sport_name: "Football"
+                  league_id: "11997"
+                  league_name: "Premier League"
+                  home_team: "Crystal Palace"
+                  away_team: "Fulham"
+                  home_logo: "https://img.agg.example.com/team/crystal-palace.png"
+                  away_logo: "https://img.agg.example.com/team/fulham.png"
+                  home_score: 2
+                  away_score: 1
+                  status: "completed"
+                  is_live: false
+                  start_time: "2026-02-18T15:00:00Z"
+                  venue_name: "Selhurst Park"
+                  game_stage: "Full-time"
+                  round: 28
+                  round_type: "League"
+                  incidents:
+                    - type: "goal"
+                      minute: 12
+                      second: 34
+                      team: "home"
+                      player_name: "Eberechi Eze"
+                      score_snapshot:
+                        home: 1
+                        away: 0
+                  statistics:
+                    possession:
+                      home: 58
+                      away: 42
+                    shots_on_target:
+                      home: 6
+                      away: 3
+        '401':
+          description: Missing or invalid Bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: 401
+                message: "Invalid or expired token."
+        '404':
+          description: Match not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: 404
+                message: "Match not found."
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: 429
+                message: "Rate limit exceeded. Please wait 1 seconds."
+
+  /matches/{id}/lineups:
+    get:
+      tags:
+        - Matches
+      summary: Get Match Lineups
+      description: Retrieve starting lineups, bench players, and formation for a match.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Unique match ID.
+      responses:
+        '200':
+          description: Lineups data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Lineups'
+  /matches/{id}/statistics:
+    get:
+      tags:
+        - Matches
+      summary: Get Match Statistics
+      description: Retrieve possession, shots, corners, fouls, and weather data for a match.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Unique match ID.
+      responses:
+        '200':
+          description: Statistics data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Statistics'
+  /matches/{id}/insights:
+    get:
+      tags:
+        - Matches
+      summary: Get Match Insights
+      description: Retrieve H2H history, recent form, league rankings, and injuries for a match.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Unique match ID.
+      responses:
+        '200':
+          description: Insights data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Insights'
+  /matches/{id}/streams:
+    get:
+      tags:
+        - Matches
+      summary: Get Match Streams
+      description: Retrieve video stream URLs (HLS/FLV/RTMP) for a match.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Unique match ID.
+      responses:
+        '200':
+          description: Streams data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Stream'

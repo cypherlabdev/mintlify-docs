@@ -1,0 +1,396 @@
+---
+title: "Authentication"
+description: "How to authenticate with the AGG APIs and WebSockets"
+---
+
+# Authentication
+
+AGG uses an **HMAC-signed token issuance** flow followed by **JWT Bearer tokens** for all API and WebSocket access. Your merchant secret is never sent over the wire.
+
+## How It Works
+
+1. You sign a `POST /v1/auth/token` request using HMAC-SHA256
+2. AGG verifies the signature and returns a short-lived JWT
+3. You use the JWT for all subsequent REST and WebSocket requests
+4. When the token expires, repeat step 1 — there is no refresh endpoint
+
+<Info>
+**Endpoint naming note:** In OpenAPI pages you may see `POST /auth/token` because the server base URL already includes `/v1`. The full HTTP path is always `POST /v1/auth/token`.
+</Info>
+
+## Credentials
+
+You will receive two values from the AGG Aggregator Team (via onboarding/account manager):
+
+| Credential | Purpose | Where to use |
+|------------|---------|-------------|
+| `merchant_code` | Identifies your account | Sent in the token request body |
+| `merchant_secret` | Signs the token request | Used locally to compute HMAC — **never sent to AGG** |
+
+If you do not have credentials yet, contact the Aggregator Team to provision your merchant account and environment access.
+
+## Obtaining a Token
+
+### Request Format
+
+```http
+POST /v1/auth/token HTTP/1.1
+Host: api.agg.example.com
+
+```text
+merchant_code:{merchant_code}
+timestamp:{timestamp}
+nonce:{nonce}
+method:POST
+path:/v1/auth/token
+```
+
+- `timestamp`: Current UNIX time in seconds. The server will reject requests where the timestamp is more than 5 minutes old.
+- `nonce`: A unique string (like a UUID) to prevent replay attacks. Each nonce can only be used once within the 5-minute timestamp window.
+
+### Example Implementation
+
+<CodeGroup>
+
+```bash cURL
+MERCHANT_CODE="your-merchant-code"
+MERCHANT_SECRET="your-merchant-secret"
+TIMESTAMP=$(date +%s)
+NONCE=$(uuidgen | tr '[:upper:]' '[:lower:]')
+
+CANONICAL="merchant_code:${MERCHANT_CODE}\ntimestamp:${TIMESTAMP}\nnonce:${NONCE}\nmethod:POST\npath:/v1/auth/token"
+
+SIGNATURE=$(echo -n "$CANONICAL" | openssl dgst -sha256 -hmac "$MERCHANT_SECRET" | awk '{print $2}')
+
+curl -X POST https://api.agg.example.com/v1/auth/token \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"merchant_code\": \"${MERCHANT_CODE}\",
+    \"timestamp\": ${TIMESTAMP},
+    \"nonce\": \"${NONCE}\",
+    \"signature\": \"${SIGNATURE}\"
+  }"
+```
+
+```javascript JavaScript
+import crypto from 'crypto';
+
+const MERCHANT_CODE = 'your-merchant-code';
+const MERCHANT_SECRET = 'your-merchant-secret';
+
+async function getToken(baseUrl) {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const nonce = crypto.randomUUID();
+
+  const canonical = [
+    `merchant_code:${MERCHANT_CODE}`,
+    `timestamp:${timestamp}`,
+    `nonce:${nonce}`,
+    `method:POST`,
+    `path:/v1/auth/token`
+  ].join('\n');
+
+  const signature = crypto
+    .createHmac('sha256', MERCHANT_SECRET)
+    .update(canonical)
+    .digest('hex');
+
+  const res = await fetch(`${baseUrl}/v1/auth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ merchant_code: MERCHANT_CODE, timestamp, nonce, signature })
+  });
+
+  return res.json();
+}
+```
+
+```python Python
+import hmac
+import hashlib
+import time
+import uuid
+import requests
+
+MERCHANT_CODE = 'your-merchant-code'
+MERCHANT_SECRET = 'your-merchant-secret'
+
+def get_token(base_url):
+    timestamp = int(time.time())
+    nonce = str(uuid.uuid4())
+
+    canonical = '\n'.join([
+        f'merchant_code:{MERCHANT_CODE}',
+        f'timestamp:{timestamp}',
+        f'nonce:{nonce}',
+        f'method:POST',
+        f'path:/v1/auth/token'
+    ])
+
+    signature = hmac.new(
+        MERCHANT_SECRET.encode(),
+        canonical.encode(),
+        hashlib.sha256
+    ).hexdigest()
+
+    res = requests.post(f'{base_url}/v1/auth/token', json={
+        'merchant_code': MERCHANT_CODE,
+        'timestamp': timestamp,
+        'nonce': nonce,
+        'signature': signature
+    })
+
+    return res.json()
+```
+
+</CodeGroup>
+
+### Token Response
+
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR...",
+  "token_type": "Bearer",
+  "expires_in": 3600
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `access_token` | string | JWT token for all subsequent requests |
+| `token_type` | string | Always `Bearer` |
+| `expires_in` | integer | Token lifetime in seconds (3600 = 60 minutes) |
+
+---
+
+## 2. Using the Token
+
+<Tabs>
+  <Tab title="REST API">
+    Include the token in the `Authorization` header of every request:
+
+    ```http
+    GET /v1/matches HTTP/1.1
+    Host: api.agg.example.com
+    Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR...
+    ```
+  </Tab>
+  <Tab title="WebSocket API">
+    After opening the connection, send the token inside an `auth` message within 5 seconds:
+
+    ```json
+    {
+      "type": "auth",
+      "token": "eyJhbGciOiJIUzI1NiIsInR..."
+    }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Token Lifecycle & Refresh
+
+Tokens are short-lived (fixed at 60 minutes). There is no dedicated refresh endpoint. When your token is about to expire, simply request a new one by repeating the HMAC signature process via `POST /v1/auth/token`.
+
+### Token Refresh Pattern
+
+We recommend building a TokenManager class that caches the token and automatically requests a new one 5 minutes before expiration.
+
+<CodeGroup>
+
+```javascript JavaScript
+class TokenManager {
+  constructor(merchantCode, merchantSecret, baseUrl) {
+    this.merchantCode = merchantCode;
+    this.merchantSecret = merchantSecret;
+    this.baseUrl = baseUrl;
+    this.token = null;
+    this.expiresAt = 0;
+  }
+
+  async getToken() {
+    // Re-authenticate if token expires within 5 minutes
+    if (this.token && Date.now() < this.expiresAt - 5 * 60 * 1000) {
+      return this.token;
+    }
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    const nonce = crypto.randomUUID();
+
+    const canonical = [
+      `merchant_code:${this.merchantCode}`,
+      `timestamp:${timestamp}`,
+      `nonce:${nonce}`,
+      `method:POST`,
+      `path:/v1/auth/token`
+    ].join('\n');
+
+    const signature = crypto
+      .createHmac('sha256', this.merchantSecret)
+      .update(canonical)
+      .digest('hex');
+
+    const res = await fetch(`${this.baseUrl}/v1/auth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        merchant_code: this.merchantCode,
+        timestamp,
+        nonce,
+        signature
+      })
+    });
+
+    const data = await res.json();
+    this.token = data.access_token;
+    this.expiresAt = Date.now() + data.expires_in * 1000;
+    return this.token;
+  }
+}
+```
+
+```python Python
+import time
+import hmac
+import hashlib
+import uuid
+import requests
+
+class TokenManager:
+    def __init__(self, merchant_code, merchant_secret, base_url):
+        self.merchant_code = merchant_code
+        self.merchant_secret = merchant_secret
+        self.base_url = base_url
+        self.token = None
+        self.expires_at = 0
+
+    def get_token(self):
+        # Re-authenticate if token expires within 5 minutes
+        if self.token and time.time() < self.expires_at - 300:
+            return self.token
+
+        timestamp = int(time.time())
+        nonce = str(uuid.uuid4())
+
+        canonical = '\n'.join([
+            f'merchant_code:{self.merchant_code}',
+            f'timestamp:{timestamp}',
+            f'nonce:{nonce}',
+            f'method:POST',
+            f'path:/v1/auth/token'
+        ])
+
+        signature = hmac.new(
+            self.merchant_secret.encode(),
+            canonical.encode(),
+            hashlib.sha256
+        ).hexdigest()
+
+        res = requests.post(f'{self.base_url}/v1/auth/token', json={
+            'merchant_code': self.merchant_code,
+            'timestamp': timestamp,
+            'nonce': nonce,
+            'signature': signature
+        })
+
+        data = res.json()
+        self.token = data['access_token']
+        self.expires_at = time.time() + data['expires_in']
+        return self.token
+```
+
+</CodeGroup>
+
+### WebSocket Re-Authentication
+
+If your token expires during an active WebSocket connection, the server will disconnect you. Your reconnection flow should:
+
+1. Detect the disconnect (`close` event)
+2. Request a fresh token via `POST /v1/auth/token`
+3. Reconnect to the WebSocket
+4. Send the `auth` message with the new token
+5. Re-subscribe to all previously active topics
+
+<Warning>
+Subscriptions are not persisted across disconnections. You must re-subscribe after every reconnect.
+</Warning>
+
+---
+
+## Security Best Practices
+
+<Warning>
+**Never expose** your `merchant_secret` in frontend, mobile, or client-side code.
+</Warning>
+
+Your backend must act as a token broker. It should handle the HMAC signing server-side and pass only the resulting short-lived `access_token` to your frontend clients. 
+
+### Security Properties
+
+| Layer | Protection |
+|-------|-----------|
+| **HTTPS / WSS** | Encrypts all traffic in transit |
+| **HMAC signature** | Proves possession of the secret without ever sending it |
+| **Timestamp check** | Rejects requests older than 5 minutes (replay protection) |
+| **Nonce tracking** | Prevents signature reuse within the validity window |
+| **Short-lived JWT** | Limits exposure window if a token is compromised |
+
+---
+
+## JWT Payload Details
+
+For reference, the decoded JWT payload contains:
+
+```json
+{
+  "sub": "merchant_456",
+  "merchant_id": "merchant_456",
+  "scope": "read:matches read:streams read:sports read:leagues",
+  "iat": 1710500000,
+  "exp": 1710503600
+}
+```
+
+| Claim | Description |
+|-------|-------------|
+| `sub` | Subject — your merchant ID |
+| `merchant_id` | Your account identifier |
+| `scope` | Space-separated list of granted permissions |
+| `iat` | Issued at (UNIX timestamp) |
+| `exp` | Expiration (UNIX timestamp) |
+
+### Available Scopes
+
+| Scope | Access |
+|-------|--------|
+| `read:sports` | List sports |
+| `read:leagues` | List leagues |
+| `read:matches` | List and view match details, events, statistics |
+| `read:streams` | Access streaming URLs |
+
+Your granted scopes depend on your subscription tier. Contact your account manager to request additional scopes.
+
+---
+
+## Error Codes
+
+| Code | Message | Description |
+|------|---------|-------------|
+| 400 | Invalid Request | Missing or invalid parameters in the token request |
+| 401 | Unauthorized | Invalid signature, expired timestamp, or unknown merchant |
+| 403 | Forbidden | The authenticated merchant does not have the required scopes |
+| 429 | Too Many Requests | Rate limit exceeded on the auth endpoint |
+
+---
+
+## Related Pages
+
+<CardGroup cols={2}>
+  <Card title="Integration Architecture" icon="sitemap" href="/integration-architecture">
+    How to structure auth across different integration patterns
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/guides/troubleshooting">
+    Common auth errors and how to fix them
+  </Card>
+</CardGroup>

@@ -1,0 +1,109 @@
+{
+  "$schema": "https://mintlify.com/schema.json",
+    "name": "Aggregator Platform",
+  "favicon": "/favicon.png",
+  "colors": {
+    "primary": "#0D9373",
+    "light": "#10B981",
+    "dark": "#047857",
+    "background": {
+      "dark": "#0B1120"
+    }
+  },
+  "openapi": "openapi.yaml",
+  "topbarCtaButton": {
+    "name": "Dashboard",
+    "url": "https://dashboard.agg.example.com"
+  },
+  "navigation": [
+    {
+      "group": "Overview",
+      "pages": [
+        "introduction",
+        "getting-started"
+      ]
+    },
+    {
+      "group": "Authentication",
+      "pages": [
+        "authentication"
+      ]
+    },
+    {
+      "group": "Guides",
+      "pages": [
+        "guides/quickstart",
+        "integration-architecture",
+        "match-id-strategy",
+        "guides/common-use-cases",
+        "guides/troubleshooting"
+      ]
+    },
+    {
+      "group": "REST API",
+      "pages": [
+        "rest-api",
+        "endpoints/auth-token",
+        "endpoints/list-sports",
+        "endpoints/list-leagues",
+        "endpoints/list-matches",
+        "endpoints/get-match",
+        "endpoints/get-match-lineups",
+        "endpoints/get-match-statistics",
+        "endpoints/get-match-insights",
+        "endpoints/get-match-streams"
+      ]
+    },
+    {
+      "group": "API Playground",
+      "pages": [
+        "api-playground",
+        "playground/auth-token",
+        "playground/list-sports",
+        "playground/list-leagues",
+        "playground/list-matches",
+        "playground/get-match",
+        "playground/get-match-lineups",
+        "playground/get-match-statistics",
+        "playground/get-match-insights",
+        "playground/get-match-streams"
+      ]
+    },
+    {
+      "group": "WebSocket API",
+      "pages": [
+        "websocket",
+        "websocket-connection",
+        "websocket-subscriptions",
+        "websocket-events",
+        "websocket-playground"
+      ]
+    },
+    {
+      "group": "Streaming",
+      "pages": [
+        "streams",
+        "stream-playback"
+      ]
+    },
+    {
+      "group": "Policies",
+      "pages": [
+        "policies/versioning"
+      ]
+    },
+    {
+      "group": "Reference",
+      "pages": [
+        "rate-limits",
+        "errors",
+        "release-notes",
+        "changelog"
+      ]
+    }
+  ],
+  "footerSocials": {
+    "github": "https://github.com/agg-platform",
+    "twitter": "https://twitter.com/agg-platform"
+  }
+}

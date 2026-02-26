@@ -1,0 +1,238 @@
+---
+title: "WebSocket Playground"
+description: "Test AGG WebSocket connections and subscriptions interactively"
+---
+
+Use this page to understand the WebSocket message flow. Copy and paste the examples below into your WebSocket client to test against the **staging** environment.
+
+<Warning>
+Use **staging** credentials when testing. These examples send real messages to the AGG WebSocket server.
+</Warning>
+
+## Connection URL
+
+```
+wss://staging-ws.agg.example.com/ws
+```
+
+<Steps>
+
+  <Step title="Authenticate">
+    Send immediately after connection opens (within 5 seconds):
+
+```json
+{
+  "type": "auth",
+  "token": "YOUR_JWT_TOKEN"
+}
+```
+
+**Expected response:**
+
+```json
+{
+  "type": "auth_success",
+  "message": "Authenticated successfully."
+}
+```
+  </Step>
+
+  <Step title="Subscribe to a Topic">
+
+<Tabs>
+  <Tab title="Live Dashboard">
+```json
+{
+  "type": "subscribe",
+  "topic": "matches:live"
+}
+```
+  </Tab>
+  <Tab title="Single Match Detail">
+```json
+{
+  "type": "subscribe",
+  "topic": "match:prov-60154495"
+}
+```
+  </Tab>
+  <Tab title="League Scoped">
+```json
+{
+  "type": "subscribe",
+  "topic": "matches:league:39"
+}
+```
+  </Tab>
+  <Tab title="Sport Scoped">
+```json
+{
+  "type": "subscribe",
+  "topic": "matches:sport:1"
+}
+```
+  </Tab>
+</Tabs>
+
+**Expected response (for each):**
+
+```json
+{
+  "type": "subscribe_success",
+  "topic": "matches:live",
+  "message": "Subscribed to matches:live"
+}
+```
+  </Step>
+
+  <Step title="Listen for Events">
+    Once subscribed, you will receive events based on the topic type:
+
+<AccordionGroup>
+  <Accordion title="On matches:* topics (lightweight)">
+```json
+{"type": "score_update", "match_id": "prov-60154495", "home_score": 2, "away_score": 1, "timestamp": "2026-02-25T15:45:10Z"}
+```
+```json
+{"type": "status_update", "match_id": "prov-60154495", "status": "live", "game_stage": "2H", "timestamp": "2026-02-25T15:15:00Z"}
+```
+```json
+{"type": "match_added", "match_id": "prov-60154800", "data": {"home_team": "Arsenal", "away_team": "Chelsea", "league_name": "Premier League", "status": "live"}, "timestamp": "2026-02-25T16:00:00Z"}
+```
+```json
+{"type": "match_removed", "match_id": "prov-60154495", "reason": "completed", "timestamp": "2026-02-25T16:45:00Z"}
+```
+  </Accordion>
+
+  <Accordion title="On match:{id} topics (full detail)">
+```json
+{"type": "score_update", "home_score": 2, "away_score": 1, "last_scorer": "home", "timestamp": "2026-02-25T15:45:10Z"}
+```
+```json
+{"type": "incident", "data": {"incident_type": "goal", "minute": 67, "team": "home", "player_name": "M. Salah", "score_snapshot": {"home": 2, "away": 1}}, "timestamp": "2026-02-25T15:37:00Z"}
+```
+```json
+{"type": "statistics_update", "data": {"possession": {"home": 56, "away": 44}, "shots_on_target": {"home": 7, "away": 3}}, "timestamp": "2026-02-25T15:45:00Z"}
+```
+```json
+{"type": "stream_update", "data": {"stream_id": "st_789", "is_live": true, "signal_on": true, "has_video": true, "has_audio": true}, "timestamp": "2026-02-25T14:55:00Z"}
+```
+```json
+{"type": "time_update", "minute": 67, "second": 12, "timestamp": "2026-02-25T15:37:12Z"}
+```
+  </Accordion>
+</AccordionGroup>
+  </Step>
+
+  <Step title="Heartbeat">
+    Send every 30 seconds to keep the connection alive:
+
+```json
+{"type": "ping"}
+```
+
+**Expected response:**
+
+```json
+{"type": "pong"}
+```
+  </Step>
+
+  <Step title="Unsubscribe">
+```json
+{
+  "type": "unsubscribe",
+  "topic": "match:prov-60154495"
+}
+```
+
+**Expected response:**
+
+```json
+{
+  "type": "unsubscribe_success",
+  "topic": "match:prov-60154495",
+  "message": "Unsubscribed from match:prov-60154495"
+}
+```
+  </Step>
+
+</Steps>
+
+---
+
+## Interactive Test Script
+
+Copy this into a Node.js file to test the full WebSocket lifecycle:
+
+```javascript
+const WebSocket = require('ws');
+
+const WS_URL = 'wss://staging-ws.agg.example.com/ws';
+const TOKEN = 'YOUR_JWT_TOKEN'; // from POST /v1/auth/token
+
+const ws = new WebSocket(WS_URL);
+
+ws.on('open', () => {
+  console.log('[1] Connected — sending auth...');
+  ws.send(JSON.stringify({ type: 'auth', token: TOKEN }));
+});
+
+ws.on('message', (raw) => {
+  const msg = JSON.parse(raw);
+  console.log(`[${msg.type}]`, JSON.stringify(msg, null, 2));
+
+  if (msg.type === 'auth_success') {
+    console.log('[2] Authenticated — subscribing to matches:live...');
+    ws.send(JSON.stringify({ type: 'subscribe', topic: 'matches:live' }));
+  }
+
+  if (msg.type === 'subscribe_success') {
+    console.log(`[3] Subscribed to ${msg.topic} — listening for events...`);
+  }
+});
+
+// Heartbeat
+const heartbeat = setInterval(() => {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'ping' }));
+  }
+}, 30000);
+
+ws.on('close', (code, reason) => {
+  clearInterval(heartbeat);
+  console.log(`Disconnected: ${code} — ${reason}`);
+});
+
+ws.on('error', (err) => {
+  console.error('Error:', err.message);
+});
+```
+
+## Testing Tools
+
+You can also use these tools to connect to the WebSocket:
+
+| Tool | Platform | Notes |
+|------|----------|-------|
+| [wscat](https://github.com/websockets/wscat) | CLI | `wscat -c wss://staging-ws.agg.example.com/ws` |
+| [Postman](https://www.postman.com/) | Desktop | Create a WebSocket request, paste the URL |
+| [Paw / RapidAPI](https://paw.cloud/) | macOS | WebSocket tab in the sidebar |
+| Browser DevTools | Web | `new WebSocket('wss://staging-ws.agg.example.com/ws')` in Console |
+
+## Related Pages
+
+<CardGroup cols={2}>
+  <Card title="WebSocket Connection" icon="plug" href="/websocket-connection">
+    Auth, heartbeat, and reconnect patterns
+  </Card>
+  <Card title="WebSocket Events" icon="message" href="/websocket-events">
+    Detailed payloads for all event types
+  </Card>
+  <Card title="Subscriptions" icon="bell" href="/websocket-subscriptions">
+    Topic model, limits, and cleanup patterns
+  </Card>
+  <Card title="API Playground" icon="play" href="/api-playground">
+    Test REST endpoints interactively
+  </Card>
+</CardGroup>

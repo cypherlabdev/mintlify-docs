@@ -1,0 +1,106 @@
+---
+title: "Get Match Statistics"
+description: "Retrieve match statistics and weather data"
+api: "GET /matches/{id}/statistics"
+playground: "simple"
+---
+
+Retrieve the possession, shots, corners, fouls, and structured weather data for a match.
+
+<Info>
+This is a dedicated endpoint for statistics. It returns exactly the same `statistics` and `weather` data as `GET /matches/{id}?include=statistics,weather`, but without the core match fields.
+</Info>
+
+## Request
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  Unique match ID (e.g. `prov-60154495`)
+</ParamField>
+
+### Example Request
+
+```bash
+curl https://api.agg.example.com/v1/matches/prov-60154495/statistics \
+  -H "Authorization: Bearer <access_token>"
+```
+
+---
+
+## Response
+
+<ResponseField name="code" type="integer">
+  HTTP status code (`200`)
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  `"success"`
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Statistics and weather data
+
+  <Expandable title="Statistics Object">
+    <ResponseField name="statistics" type="object">
+      Match statistics. All values are objects containing `{ "home": int, "away": int }`.
+      <Expandable title="Stats Breakdown">
+        <ResponseField name="possession" type="object">Ball possession % (home + away = 100)</ResponseField>
+        <ResponseField name="shots_on_target" type="object">Shots on target</ResponseField>
+        <ResponseField name="shots_off_target" type="object">Shots off target</ResponseField>
+        <ResponseField name="corners" type="object">Corner kicks</ResponseField>
+        <ResponseField name="yellow_cards" type="object">Yellow cards</ResponseField>
+        <ResponseField name="red_cards" type="object">Red cards</ResponseField>
+        <ResponseField name="dangerous_attacks" type="object">Dangerous attacks</ResponseField>
+        <ResponseField name="fouls" type="object">Fouls committed</ResponseField>
+        <ResponseField name="offsides" type="object">Offsides</ResponseField>
+        <ResponseField name="attacks" type="object">Total attacks</ResponseField>
+        <ResponseField name="free_kicks" type="object">Free kicks</ResponseField>
+      </Expandable>
+    </ResponseField>
+    
+    <ResponseField name="weather" type="object">
+      Match weather conditions.
+      <Expandable title="Weather Object">
+        <ResponseField name="condition" type="string">Weather condition</ResponseField>
+        <ResponseField name="temperature" type="integer">Temperature (°C)</ResponseField>
+        <ResponseField name="humidity" type="integer">Humidity (%)</ResponseField>
+        <ResponseField name="wind_speed" type="integer">Wind speed (km/h)</ResponseField>
+        <ResponseField name="wind_direction" type="string">Wind direction</ResponseField>
+        <ResponseField name="pressure" type="integer">Pressure (hPa)</ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<RequestExample>
+```json Example Response
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "statistics": {
+      "possession": { "home": 58, "away": 42 },
+      "shots_on_target": { "home": 6, "away": 3 },
+      "shots_off_target": { "home": 4, "away": 5 },
+      "corners": { "home": 7, "away": 2 },
+      "yellow_cards": { "home": 1, "away": 2 },
+      "red_cards": { "home": 0, "away": 0 },
+      "dangerous_attacks": { "home": 45, "away": 30 },
+      "fouls": { "home": 12, "away": 10 },
+      "offsides": { "home": 2, "away": 1 },
+      "attacks": { "home": 90, "away": 75 },
+      "free_kicks": { "home": 11, "away": 14 }
+    },
+    "weather": {
+      "condition": "Cloudy",
+      "temperature": 15,
+      "humidity": 72,
+      "wind_speed": 12,
+      "wind_direction": "NW",
+      "pressure": 1013
+    }
+  }
+}
+```
+</RequestExample>

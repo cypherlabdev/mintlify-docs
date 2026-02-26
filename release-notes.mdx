@@ -1,0 +1,29 @@
+---
+title: "Release Notes"
+description: "The latest updates and new features in the AGG API"
+---
+
+This page tracks the most recent releases, new features, and breaking changes. For a complete history of older releases, please see the [Changelog](/changelog).
+
+<Update label="v1.0.0" description="March 2026">
+Initial stable release of the AGG platform, unifying REST APIs and WebSocket real-time delivery.
+
+### Features
+- **REST API:**
+  - `GET /v1/sports` — List available sports
+  - `GET /v1/leagues` — List available leagues
+  - `GET /v1/matches` — Paginated match listing with filtering
+  - `GET /v1/matches/{id}` — Match details with selective `include` parameter (streams, incidents available; statistics, lineups, weather, insights coming soon)
+- **WebSocket:**
+  - JWT authentication via `auth` message
+  - Topic-based subscriptions: `match:{id}`, `matches:live`, `matches:league:{id}`, `matches:sport:{id}`
+  - Real-time events: `score_update`, `status_update`, `time_update`, `incident`, `statistics_update`, `stream_update`, `match_added`, `match_removed`
+- **Authentication:**
+  - HMAC-SHA256 signed token issuance via `POST /v1/auth/token`
+  - Short-lived JWT (60 min) for REST and WebSocket
+  - Replay protection via timestamp + nonce
+- **Security:**
+  - Rate limiting (10 RPS REST, 50 WS connections)
+  - Optional IP allowlist
+  - Standardized error codes
+</Update>

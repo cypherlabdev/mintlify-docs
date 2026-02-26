@@ -1,0 +1,172 @@
+---
+title: "List Matches"
+description: "Retrieve a paginated list of matches with filtering and sorting"
+api: "GET /matches"
+playground: "simple"
+---
+
+Returns a paginated list of matches. Supports filtering by sport, league, status, and date, as well as sorting.
+
+## Request
+
+```http
+GET /v1/matches
+Authorization: Bearer <access_token>
+```
+
+### Query Parameters
+
+<ParamField query="sport_id" type="string">
+  Filter by sport ID
+</ParamField>
+
+<ParamField query="league_id" type="string">
+  Filter by league ID
+</ParamField>
+
+<ParamField query="status" type="string">
+  Filter by match status. One of: `live`, `scheduled`, `completed`, `halftime`, `postponed`, `cancelled`
+</ParamField>
+
+<ParamField query="date" type="string">
+  Filter by date in `YYYY-MM-DD` format
+</ParamField>
+
+<ParamField query="page" type="integer" default="1">
+  Page number for pagination
+</ParamField>
+
+<ParamField query="limit" type="integer" default="20">
+  Items per page (max `100`)
+</ParamField>
+
+### Example Request
+
+```bash
+# Live football matches, page 1
+curl "https://api.agg.example.com/v1/matches?sport_id=1&status=live&page=1&limit=20" \
+  -H "Authorization: Bearer <access_token>"
+
+# All matches on a specific date
+curl "https://api.agg.example.com/v1/matches?date=2024-03-15" \
+  -H "Authorization: Bearer <access_token>"
+```
+
+---
+
+## Response
+
+<ResponseField name="code" type="integer">
+  HTTP status code (`200`)
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  `"success"`
+</ResponseField>
+
+<ResponseField name="meta" type="object">
+  Pagination metadata
+  <Expandable title="properties">
+    <ResponseField name="page" type="integer">
+      Current page number
+    </ResponseField>
+    <ResponseField name="limit" type="integer">
+      Items per page
+    </ResponseField>
+    <ResponseField name="total" type="integer">
+      Total number of matching items
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="data" type="array">
+  List of match objects
+  <Expandable title="Match Object">
+    <ResponseField name="id" type="string">
+      Unique match identifier (prefixed)
+    </ResponseField>
+    <ResponseField name="match_id" type="string">
+      Raw match identifier from provider
+    </ResponseField>
+    <ResponseField name="sport_id" type="string">
+      Sport identifier
+    </ResponseField>
+    <ResponseField name="sport_name" type="string">
+      Sport name
+    </ResponseField>
+    <ResponseField name="league_id" type="string">
+      League identifier
+    </ResponseField>
+    <ResponseField name="league_name" type="string">
+      League name
+    </ResponseField>
+    <ResponseField name="home_team" type="string">
+      Home team name
+    </ResponseField>
+    <ResponseField name="away_team" type="string">
+      Away team name
+    </ResponseField>
+    <ResponseField name="home_logo" type="string">
+      Home team logo URL
+    </ResponseField>
+    <ResponseField name="away_logo" type="string">
+      Away team logo URL
+    </ResponseField>
+    <ResponseField name="home_score" type="integer">
+      Home team score
+    </ResponseField>
+    <ResponseField name="away_score" type="integer">
+      Away team score
+    </ResponseField>
+    <ResponseField name="game_stage" type="string">
+      Current game stage (see [Game Stages](/rest-api#game-stage-values))
+    </ResponseField>
+    <ResponseField name="status" type="string">
+      Match status (see [Match Statuses](/rest-api#match-status-values))
+    </ResponseField>
+    <ResponseField name="is_live" type="boolean">
+      Whether the match is currently live
+    </ResponseField>
+    <ResponseField name="start_time" type="string">
+      Scheduled start time (ISO 8601 UTC)
+    </ResponseField>
+    <ResponseField name="has_stream" type="boolean">
+      Whether streaming is available
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<RequestExample>
+```json Example Response
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "id": "prov-60154495",
+      "match_id": "60154495",
+      "sport_id": "1",
+      "sport_name": "Football",
+      "league_id": "39",
+      "league_name": "Premier League",
+      "home_team": "Arsenal",
+      "away_team": "Chelsea",
+      "home_logo": "https://img.example.com/team/1.png",
+      "away_logo": "https://img.example.com/team/2.png",
+      "home_score": 2,
+      "away_score": 1,
+      "game_stage": "2H",
+      "status": "live",
+      "is_live": true,
+      "start_time": "2024-03-15T14:30:00Z",
+      "has_stream": true
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "limit": 20,
+    "total": 150
+  }
+}
+```
+</RequestExample>

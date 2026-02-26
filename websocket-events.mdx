@@ -1,0 +1,279 @@
+---
+title: "WebSocket Events"
+description: "Detailed payloads for WebSocket real-time events"
+---
+
+# WebSocket Events
+
+Events received on WebSocket topics. The events you receive depend on whether you subscribed to an instance topic (`match:{id}`) or a category topic (`matches:*`).
+
+## Events by Topic Type
+
+| Event Type | `match:{id}` | `matches:*` | Description |
+|-----------|:---:|:---:|-------------|
+| `score_update` | Yes | Yes | Score changed |
+| `status_update` | Yes | Yes | Match status or game stage changed |
+| `time_update` | Yes | No | Match clock tick |
+| `incident` | Yes | No | Goal, card, substitution, VAR |
+| `statistics_update` | Yes | No | Possession, shots, corners, etc. |
+| `stream_update` | Yes | No | Stream availability changed |
+| `match_added` | No | Yes | New match entered the group |
+| `match_removed` | No | Yes | Match left the group |
+
+## score_update
+
+Triggered when a team scores.
+
+**On `match:{id}`:**
+
+```json
+{
+  "type": "score_update",
+  "home_score": 2,
+  "away_score": 1,
+  "last_scorer": "home",
+  "timestamp": "2026-02-25T15:45:10Z"
+}
+```
+
+**On `matches:*`:**
+
+```json
+{
+  "type": "score_update",
+  "match_id": "prov-60154495",
+  "home_score": 2,
+  "away_score": 1,
+  "timestamp": "2026-02-25T15:45:10Z"
+}
+```
+
+<Info>
+On category topics, every event includes `match_id` so you know which match it refers to. On instance topics, the match is implied by the subscription.
+</Info>
+
+## status_update
+
+Triggered when the match status or game stage changes.
+
+```json
+{
+  "type": "status_update",
+  "match_id": "prov-60154495",
+  "status": "live",
+  "game_stage": "2H",
+  "timestamp": "2026-02-25T15:15:00Z"
+}
+```
+
+Status values: `scheduled`, `live`, `halftime`, `completed`, `postponed`, `cancelled`
+
+Game stage values: `1H`, `HT`, `2H`, `ET`, `PEN`, `FT`
+
+## time_update
+
+Periodic match clock ticks. Only sent on `match:{id}` topics.
+
+```json
+{
+  "type": "time_update",
+  "minute": 67,
+  "second": 12,
+  "timestamp": "2026-02-25T15:37:12Z"
+}
+```
+
+## incident
+
+Major on-field events. Only sent on `match:{id}` topics.
+
+### Incident Types
+
+| Incident Type | Description |
+|---------------|-------------|
+| `goal` | Goal scored |
+| `own_goal` | Own goal |
+| `yellow_card` | Yellow card shown |
+| `red_card` | Red card (direct or second yellow) |
+| `substitution` | Player substituted |
+| `var_decision` | VAR review decision |
+| `penalty` | Penalty awarded or taken |
+
+### Goal
+
+```json
+{
+  "type": "incident",
+  "data": {
+    "incident_type": "goal",
+    "minute": 67,
+    "second": 0,
+    "team": "home",
+    "player_name": "M. Salah",
+    "score_snapshot": { "home": 2, "away": 1 }
+  },
+  "timestamp": "2026-02-25T15:37:00Z"
+}
+```
+
+### Card
+
+```json
+{
+  "type": "incident",
+  "data": {
+    "incident_type": "yellow_card",
+    "minute": 55,
+    "second": 30,
+    "team": "away",
+    "player_name": "M. Mount"
+  },
+  "timestamp": "2026-02-25T15:25:30Z"
+}
+```
+
+### Substitution
+
+```json
+{
+  "type": "incident",
+  "data": {
+    "incident_type": "substitution",
+    "minute": 70,
+    "second": 15,
+    "team": "home",
+    "player_in": "L. Trossard",
+    "player_out": "G. Martinelli"
+  },
+  "timestamp": "2026-02-25T15:40:15Z"
+}
+```
+
+### VAR Decision
+
+```json
+{
+  "type": "incident",
+  "data": {
+    "incident_type": "var_decision",
+    "minute": 78,
+    "second": 0,
+    "team": "away",
+    "var_reason": "Possible handball",
+    "var_result": "Goal disallowed"
+  },
+  "timestamp": "2026-02-25T15:48:00Z"
+}
+```
+
+## statistics_update
+
+Match statistics update. Only sent on `match:{id}` topics.
+
+```json
+{
+  "type": "statistics_update",
+  "data": {
+    "possession": { "home": 56, "away": 44 },
+    "shots_on_target": { "home": 7, "away": 3 },
+    "corners": { "home": 9, "away": 2 },
+    "fouls": { "home": 11, "away": 13 }
+  },
+  "timestamp": "2026-02-25T15:45:00Z"
+}
+```
+
+## stream_update
+
+Stream availability change. Only sent on `match:{id}` topics.
+
+```json
+{
+  "type": "stream_update",
+  "data": {
+    "stream_id": "st_789",
+    "is_live": true,
+    "signal_on": true,
+    "has_video": true,
+    "has_audio": true
+  },
+  "timestamp": "2026-02-25T14:55:00Z"
+}
+```
+
+## match_added
+
+A new match entered the subscribed group. Only sent on `matches:*` topics.
+
+```json
+{
+  "type": "match_added",
+  "match_id": "prov-60154800",
+  "data": {
+    "sport_id": "1",
+    "sport_name": "Football",
+    "league_id": "39",
+    "league_name": "Premier League",
+    "home_team": "Arsenal",
+    "away_team": "Chelsea",
+    "home_score": 0,
+    "away_score": 0,
+    "status": "live",
+    "game_stage": "1H",
+    "start_time": "2026-02-25T16:00:00Z",
+    "has_stream": true
+  },
+  "timestamp": "2026-02-25T16:00:00Z"
+}
+```
+
+## match_removed
+
+A match left the subscribed group (e.g., completed). Only sent on `matches:*` topics.
+
+```json
+{
+  "type": "match_removed",
+  "match_id": "prov-60154495",
+  "reason": "completed",
+  "timestamp": "2026-02-25T16:45:00Z"
+}
+```
+
+## Event Frequency & Timing
+
+| Event | Frequency | Latency |
+|-------|-----------|---------|
+| `score_update` | Per goal/point | < 2 seconds |
+| `status_update` | Per status change | < 2 seconds |
+| `time_update` | Every 10-30 seconds | Best effort |
+| `incident` | Per on-field event | < 5 seconds |
+| `statistics_update` | Every 30-60 seconds | Best effort |
+| `stream_update` | On change | < 5 seconds |
+| `match_added` / `match_removed` | On change | < 5 seconds |
+
+<Info>
+Event latency values are typical — actual latency depends on the upstream provider. `score_update` and `incident` events prioritize speed; `time_update` and `statistics_update` are best-effort periodic updates.
+</Info>
+
+## Deduplication
+
+<Warning>
+After reconnections, you may receive duplicate events. Deduplicate using `match_id` + `type` + `timestamp` as a composite key.
+</Warning>
+
+```javascript
+const seen = new Set();
+
+function handleEvent(msg) {
+  const matchId = msg.match_id || 'self';
+  const key = `${matchId}:${msg.type}:${msg.timestamp}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+
+  // Process event...
+
+  // Cleanup old keys periodically
+  if (seen.size > 10000) seen.clear();
+}
+```

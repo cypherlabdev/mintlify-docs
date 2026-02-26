@@ -1,0 +1,127 @@
+---
+title: "Streaming URLs"
+description: "How to handle live streaming URLs from AGG"
+---
+
+AGG aggregates streaming URLs from various upstream providers and delivers them directly to your clients.
+
+## Stream Hosting & Distribution
+
+It is critical to understand AGG's role in the streaming architecture:
+
+<CardGroup cols={2}>
+  <Card title="AGG returns streaming URLs" icon="link">
+    We provide the exact URLs needed to connect to the live video feed.
+  </Card>
+  <Card title="AGG does not host streams" icon="server">
+    The video content is hosted and distributed by the original upstream providers.
+  </Card>
+  <Card title="AGG does not transcode video" icon="film">
+    The stream format, quality, and bitrate are determined by the upstream provider.
+  </Card>
+  <Card title="Client playback is your responsibility" icon="play">
+    Your frontend or mobile application must implement a compatible video player to render the stream.
+  </Card>
+</CardGroup>
+
+## Supported Formats
+
+Stream URLs returned by AGG will typically be in one of the following formats:
+
+<AccordionGroup>
+  <Accordion title="HLS (.m3u8)" icon="apple">
+    HTTP Live Streaming. This is the most common format, widely supported across modern browsers (often via HLS.js) and native mobile platforms (iOS natively, Android via ExoPlayer).
+  </Accordion>
+  <Accordion title="FLV (.flv)" icon="bolt">
+    Flash Video over HTTP. Common in some Asian markets for low-latency web streaming. Requires specific web players (like flv.js).
+  </Accordion>
+  <Accordion title="RTMP (rtmp://)" icon="desktop">
+    Real-Time Messaging Protocol. Primarily used for low-latency desktop applications or older flash-based setups. Not natively supported in modern web browsers without plugins.
+  </Accordion>
+</AccordionGroup>
+
+## Player Library Recommendations
+
+| Platform | Format | Recommended Library |
+|----------|--------|-------------------|
+| Web | m3u8 (HLS) | [HLS.js](https://github.com/video-dev/hls.js) |
+| Web | FLV | [flv.js](https://github.com/bilibili/flv.js) |
+| Android | m3u8 / FLV | [ExoPlayer](https://github.com/google/ExoPlayer) |
+| iOS | m3u8 (HLS) | AVPlayer (native) |
+
+## Stream URL Lifecycle
+
+- **Availability:** Stream URLs typically become available ~30 minutes before the match start time
+- **Validity:** URLs remain valid through the match duration and approximately 1 hour after the match ends
+- **Expiry:** After expiry, URLs will return 403 or 404 errors — fetch fresh URLs via the API
+
+<Warning>
+Do not cache stream URLs for extended periods. Always fetch fresh URLs when a user starts playback or if the current URL fails.
+</Warning>
+
+## Fetching Stream URLs
+
+Fetch stream URLs via the match detail endpoint with the `include` parameter:
+
+```http
+GET /v1/matches/{id}?include=streams
+```
+
+Streams are also included by default when calling `GET /v1/matches/{id}` without an `include` parameter.
+
+<RequestExample>
+```json Example Response
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "stream_id": "st_789",
+      "url": "https://stream.agg.example.com/live/sport/60154495_hd.m3u8",
+      "format": "m3u8",
+      "language": "en",
+      "quality": "1080p"
+    },
+    {
+      "stream_id": "st_790",
+      "url": "https://stream.agg.example.com/live/sport/60154495.flv",
+      "format": "flv",
+      "language": "zh",
+      "quality": "720p"
+    },
+    {
+      "stream_id": "st_791",
+      "url": "rtmp://stream.agg.example.com/live/sport/60154495",
+      "format": "rtmp",
+      "language": "es",
+      "quality": "SD"
+    }
+  ]
+}
+```
+</RequestExample>
+
+## Failure Handling
+
+| HTTP Status | Meaning | Action |
+|-------------|---------|--------|
+| `403` | Geo-blocked or access denied | Stream not available in user's region; try a different stream URL or notify user |
+| `404` | URL expired or stream not yet available | Re-fetch stream URLs from the API; if match hasn't started, retry closer to start time |
+| `500` / timeout | Upstream provider issue | Try a different stream URL from the list; if all fail, retry after 30 seconds |
+
+## Best Practices
+
+*   **Fallback Players:** Because different upstream providers might return different formats, ensure your client application can handle at least `.m3u8` and `.flv`.
+*   **Handle CORS Issues:** While AGG APIs support CORS, the actual streaming URLs provided by upstream partners might have varying CORS policies. If your web application encounters CORS errors when trying to play a `.m3u8` or `.flv` stream directly in the browser, you may need to implement a lightweight reverse proxy or coordinate with your account manager.
+*   **Monitor Stream Availability:** Streams usually become available shortly before the match starts. Do not aggressively poll the streams endpoint days in advance.
+
+## Related Pages
+
+<CardGroup cols={2}>
+  <Card title="Stream Playback" icon="play" href="/stream-playback">
+    Player setup for HLS.js, flv.js, ExoPlayer, and AVPlayer
+  </Card>
+  <Card title="Common Use Cases" icon="book" href="/guides/common-use-cases#3-stream-aggregator">
+    Stream aggregator walkthrough with fallback logic
+  </Card>
+</CardGroup>

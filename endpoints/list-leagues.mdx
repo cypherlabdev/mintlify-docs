@@ -1,0 +1,88 @@
+---
+title: "List Leagues"
+description: "Retrieve leagues, optionally filtered by sport"
+api: "GET /leagues"
+playground: "simple"
+---
+
+Returns a list of available leagues. Optionally filter by `sport_id` to get leagues for a specific sport.
+
+---
+
+## Request
+
+```http
+GET /v1/leagues
+Authorization: Bearer <access_token>
+```
+
+### Query Parameters
+
+<ParamField query="sport_id" type="string">
+  Filter leagues by sport ID
+</ParamField>
+
+### Example Request
+
+```bash
+# All leagues
+curl https://api.agg.example.com/v1/leagues \
+  -H "Authorization: Bearer <access_token>"
+
+# Leagues for Football only
+curl "https://api.agg.example.com/v1/leagues?sport_id=1" \
+  -H "Authorization: Bearer <access_token>"
+```
+
+---
+
+## Response
+
+<ResponseField name="code" type="integer">
+  HTTP status code (`200`)
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  `"success"`
+</ResponseField>
+
+<ResponseField name="data" type="array">
+  List of league objects
+  <Expandable title="League Object">
+    <ResponseField name="league_id" type="string">
+      Unique league identifier
+    </ResponseField>
+    <ResponseField name="league_name" type="string">
+      Human-readable league name
+    </ResponseField>
+    <ResponseField name="sport_id" type="string">
+      Parent sport identifier
+    </ResponseField>
+    <ResponseField name="sport_name" type="string">
+      Parent sport name
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<RequestExample>
+```json Example Response
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "league_id": "39",
+      "league_name": "Premier League",
+      "sport_id": "1",
+      "sport_name": "Football"
+    },
+    {
+      "league_id": "140",
+      "league_name": "La Liga",
+      "sport_id": "1",
+      "sport_name": "Football"
+    }
+  ]
+}
+```
+</RequestExample>

@@ -1,0 +1,317 @@
+---
+title: "Common Use Cases"
+description: "Step-by-step walkthroughs for typical AGG integrations"
+---
+
+# Common Use Cases
+
+Practical walkthroughs for the most common AGG integration scenarios.
+
+## 1. Live Sports Dashboard
+
+Display live scores across multiple sports and leagues, updated in real-time.
+
+### What You'll Build
+
+- A page showing all live matches with scores
+- Real-time score updates via WebSocket
+- Filters by sport and league
+
+### Step-by-Step
+
+**1. Load initial data with REST**
+
+```javascript
+// Fetch sports and leagues for filter dropdowns
+const [sports, leagues] = await Promise.all([
+  fetch(`${BASE_URL}/sports`, { headers: authHeaders }).then(r => r.json()),
+  fetch(`${BASE_URL}/leagues`, { headers: authHeaders }).then(r => r.json())
+]);
+
+// Fetch all live matches
+const matches = await fetch(`${BASE_URL}/matches?status=live`, {
+  headers: authHeaders
+}).then(r => r.json());
+
+// Render initial state
+renderDashboard(matches.data);
+```
+
+**2. Subscribe to real-time updates**
+
+```javascript
+const ws = new WebSocket(WS_URL);
+
+ws.on('open', () => {
+  ws.send(JSON.stringify({ type: 'auth', token: accessToken }));
+});
+
+ws.on('message', (raw) => {
+  const msg = JSON.parse(raw);
+
+  if (msg.type === 'auth_success') {
+    // Subscribe to all live matches
+    ws.send(JSON.stringify({ type: 'subscribe', topic: 'matches:live' }));
+  }
+
+  if (msg.type === 'score_update') {
+    updateMatchScore(msg.match_id, msg.home_score, msg.away_score);
+  }
+
+  if (msg.type === 'match_added') {
+    addMatchToList(msg.match_id, msg.data);
+  }
+
+  if (msg.type === 'match_removed') {
+    removeMatchFromList(msg.match_id);
+  }
+});
+```
+
+**3. Apply client-side filters**
+
+```javascript
+function filterMatches(matches, sportId, leagueId) {
+  return matches.filter(m =>
+    (!sportId || m.sport_id === sportId) &&
+    (!leagueId || m.league_id === leagueId)
+  );
+}
+```
+
+<Info>
+Use `matches:live` topic for the dashboard overview. Only subscribe to `match:{id}` when the user drills into a specific match — it gives you full detail (incidents, stats, stream changes).
+</Info>
+
+---
+
+## 2. Match Detail Page
+
+Show full match details including score, events timeline, statistics, and stream player.
+
+### What You'll Build
+
+- Match header with teams, score, and status
+- Live events timeline (goals, cards, substitutions)
+- Statistics panel (possession, shots, corners)
+- Embedded stream player
+
+### Step-by-Step
+
+**1. Load match data from REST**
+
+```javascript
+const matchId = 'prov-60154495';
+
+// Fetch match center data in a single call
+const match = await fetch(
+  `${BASE_URL}/matches/${matchId}?include=streams,statistics,incidents,weather`,
+  { headers: authHeaders }
+).then(r => r.json());
+
+renderMatchHeader(match.data);
+renderTimeline(match.data.incidents);
+renderStats(match.data.statistics);
+initStreamPlayer(match.data.streams);
+```
+
+**2. Subscribe to real-time updates for this match**
+
+```javascript
+// After WebSocket auth succeeds — subscribe to full match detail
+ws.send(JSON.stringify({ type: 'subscribe', topic: `match:${matchId}` }));
+
+ws.on('message', (raw) => {
+  const msg = JSON.parse(raw);
+
+  switch (msg.type) {
+    case 'score_update':
+      updateScore(msg);
+      break;
+    case 'incident':
+      appendToTimeline(msg.data);
+      break;
+    case 'statistics_update':
+      updateStats(msg.data);
+      break;
+    case 'stream_update':
+      updateStreamStatus(msg.data);
+      break;
+  }
+});
+```
+
+**3. Clean up on navigation away**
+
+```javascript
+function onLeaveMatchPage() {
+  ws.send(JSON.stringify({ type: 'unsubscribe', topic: `match:${matchId}` }));
+}
+```
+
+---
+
+## 3. Stream Aggregator
+
+Fetch and play stream URLs with format fallback logic.
+
+### What You'll Build
+
+- Fetch available streams for a match
+- Implement player fallback: try m3u8 first, then flv, then rtmp
+- Handle stream failures gracefully
+
+### Step-by-Step
+
+**1. Fetch streams and sort by preference**
+
+```javascript
+const match = await fetch(`${BASE_URL}/matches/${matchId}?include=streams`, {
+  headers: authHeaders
+}).then(r => r.json());
+
+// Sort by format preference
+const FORMAT_PRIORITY = { m3u8: 1, flv: 2, rtmp: 3 };
+const sorted = match.data.streams.sort(
+  (a, b) => (FORMAT_PRIORITY[a.format] || 99) - (FORMAT_PRIORITY[b.format] || 99)
+);
+```
+
+**2. Implement fallback player**
+
+```javascript
+import Hls from 'hls.js';
+import flvjs from 'flv.js';
+
+async function playStream(streams, videoElement) {
+  for (const stream of streams) {
+    try {
+      await tryPlay(stream, videoElement);
+      return; // Success — stop trying
+    } catch (err) {
+      console.warn(`Stream ${stream.stream_id} (${stream.format}) failed:`, err);
+      continue; // Try next stream
+    }
+  }
+  throw new Error('All streams failed');
+}
+
+function tryPlay(stream, video) {
+  return new Promise((resolve, reject) => {
+    if (stream.format === 'm3u8' && Hls.isSupported()) {
+      const hls = new Hls();
+      hls.loadSource(stream.url);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => { video.play(); resolve(); });
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (data.fatal) { hls.destroy(); reject(data); }
+      });
+    } else if (stream.format === 'flv' && flvjs.isSupported()) {
+      const player = flvjs.createPlayer({ type: 'flv', url: stream.url });
+      player.attachMediaElement(video);
+      player.load();
+      player.play();
+      video.onplaying = () => resolve();
+      player.on(flvjs.Events.ERROR, reject);
+    } else {
+      reject(new Error(`Unsupported format: ${stream.format}`));
+    }
+  });
+}
+```
+
+**3. Handle stream expiry**
+
+```javascript
+async function handleStreamError(matchId, videoElement) {
+  // Re-fetch fresh stream URLs
+  const fresh = await fetch(`${BASE_URL}/matches/${matchId}?include=streams`, {
+    headers: authHeaders
+  }).then(r => r.json());
+
+  const sorted = fresh.data.streams.sort(
+    (a, b) => (FORMAT_PRIORITY[a.format] || 99) - (FORMAT_PRIORITY[b.format] || 99)
+  );
+
+  await playStream(sorted, videoElement);
+}
+```
+
+<Warning>
+Stream URLs expire after the match ends. Always re-fetch from the API if playback fails with a 403 or 404.
+</Warning>
+
+---
+
+## 4. Sports Filter UI
+
+Build a cascading filter dropdown (Sport > League > Matches) using AGG's reference data endpoints.
+
+### What You'll Build
+
+- Sport dropdown populated from `/sports`
+- League dropdown filtered by selected sport from `/leagues`
+- Match list filtered by selected league
+
+### Step-by-Step
+
+**1. Populate sport dropdown**
+
+```javascript
+const sports = await fetch(`${BASE_URL}/sports`, {
+  headers: authHeaders
+}).then(r => r.json());
+
+const sportSelect = document.getElementById('sport-filter');
+sports.data.forEach(sport => {
+  const option = document.createElement('option');
+  option.value = sport.id;
+  option.textContent = sport.name;
+  sportSelect.appendChild(option);
+});
+```
+
+**2. Load leagues when sport changes**
+
+```javascript
+sportSelect.addEventListener('change', async (e) => {
+  const sportId = e.target.value;
+  const leagues = await fetch(`${BASE_URL}/leagues?sport_id=${sportId}`, {
+    headers: authHeaders
+  }).then(r => r.json());
+
+  const leagueSelect = document.getElementById('league-filter');
+  leagueSelect.innerHTML = '<option value="">All Leagues</option>';
+  leagues.data.forEach(league => {
+    const option = document.createElement('option');
+    option.value = league.id;
+    option.textContent = league.name;
+    leagueSelect.appendChild(option);
+  });
+});
+```
+
+**3. Fetch matches with combined filters**
+
+```javascript
+async function fetchFilteredMatches() {
+  const sportId = document.getElementById('sport-filter').value;
+  const leagueId = document.getElementById('league-filter').value;
+  const status = document.getElementById('status-filter').value;
+
+  const params = new URLSearchParams();
+  if (sportId) params.set('sport_id', sportId);
+  if (leagueId) params.set('league_id', leagueId);
+  if (status) params.set('status', status);
+
+  const matches = await fetch(`${BASE_URL}/matches?${params}`, {
+    headers: authHeaders
+  }).then(r => r.json());
+
+  renderMatchList(matches.data);
+}
+```
+
+<Info>
+Cache `/sports` and `/leagues` responses locally — they change infrequently. See [REST API](/rest-api#caching-recommendations) for recommended TTLs.
+</Info>

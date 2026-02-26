@@ -1,0 +1,244 @@
+---
+title: "Troubleshooting"
+description: "Common issues, debugging tips, and solutions"
+---
+
+# Troubleshooting
+
+Solutions for the most common issues when integrating with AGG.
+
+## Authentication Errors
+
+### "401 Unauthorized" on every request
+
+**Cause:** Token is missing, expired, or malformed.
+
+**Solutions:**
+1. Verify your token hasn't expired — check the `exp` claim in the JWT payload
+2. Ensure the `Authorization` header format is exactly `Bearer <token>` (with a space, no quotes around the token)
+3. Confirm you're using a token from the correct environment (staging token won't work on production)
+
+```bash
+# Decode your JWT to check expiry (base64 decode the middle section)
+echo "YOUR_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null | jq .
+```
+
+### "401" on POST /auth/token
+
+**Cause:** Invalid HMAC signature, expired timestamp, or unknown merchant code.
+
+**Solutions:**
+1. Verify your `merchant_code` and `merchant_secret` are current in the [Dashboard](https://dashboard.agg.example.com)
+2. Check that your system clock is accurate — timestamps older than 5 minutes are rejected
+3. Verify the canonical string format uses `\n` (LF) line endings, not `\r\n`
+4. Ensure the nonce is a fresh UUID for each request
+5. If you've retried 3 times and still getting 401, stop — contact your account manager
+
+### "403 Forbidden" on specific endpoints
+
+**Cause:** Your account lacks the required scopes.
+
+**Solutions:**
+1. Decode your JWT and check the `scope` claim
+2. Compare against [Available Scopes](/authentication#available-scopes)
+3. Contact your account manager to request additional scopes
+
+---
+
+## REST API Issues
+
+### Empty `data` array in responses
+
+**Possible causes:**
+- No matches exist for the given filters (e.g., no live matches at the current time)
+- The `sport_id` or `league_id` filter value is incorrect
+- You're querying staging which has limited sample data
+
+**Debug steps:**
+1. Try the request without filters to see if any data exists
+2. First call `GET /sports` to get valid sport IDs, then `GET /leagues?sport_id=X` for valid league IDs
+3. Check if you're hitting staging vs production — staging has sample data only
+
+### "429 Too Many Requests"
+
+**Cause:** You've exceeded your rate limit.
+
+**Solutions:**
+1. Read the `X-RateLimit-Reset` header to know when you can resume
+2. Implement rate-limit-aware logic — see [Rate Limits](/rate-limits)
+3. Cache responses to reduce API calls (see [Caching Recommendations](/rest-api#caching-recommendations))
+4. Switch to WebSocket for real-time data instead of aggressive polling
+
+### Pagination returning duplicate items
+
+**Cause:** Data changed between page requests (e.g., a match went from scheduled to live).
+
+**Solutions:**
+- This is expected behavior with live data — deduplicate by `id` on the client side
+- For critical data, prefer fetching by specific filters rather than paginating through all results
+
+---
+
+## WebSocket Issues
+
+### Connection closes immediately after opening
+
+**Possible causes:**
+1. Auth message not sent within 5 seconds
+2. Invalid or expired token
+3. Network proxy or firewall blocking WebSocket
+
+**Debug steps:**
+
+```javascript
+ws.on('open', () => {
+  console.log('Connected at:', new Date().toISOString());
+  // Auth MUST be sent within 5 seconds of this timestamp
+  ws.send(JSON.stringify({ type: 'auth', token: YOUR_TOKEN }));
+});
+
+ws.on('close', (code, reason) => {
+  console.log(`Closed: code=${code}, reason=${reason}`);
+  // 1008 = policy violation (auth timeout or invalid token)
+  // 1001 = server going away (server restart)
+});
+
+ws.on('error', (err) => {
+  console.error('WebSocket error:', err.message);
+});
+```
+
+### Not receiving events after subscribing
+
+**Possible causes:**
+1. Subscription failed — check for `subscribe_error` messages
+2. No events are happening (match might be paused or not started)
+3. Subscribed with wrong `match_id`
+
+**Debug steps:**
+1. Log all incoming messages to see if you're getting `subscribe_success`
+2. Verify the `match_id` exists and the match status is `live`
+3. Try subscribing to `matches:live` first — it sends updates whenever any live match changes
+
+### Frequent disconnections
+
+**Possible causes:**
+1. Missing heartbeat — ping must be sent every 30 seconds
+2. Token expiring during connection
+3. Network instability
+
+**Solutions:**
+1. Implement heartbeat: `setInterval(() => ws.send('{"type":"ping"}'), 30000)`
+2. Track token expiry and proactively reconnect before it expires
+3. Implement [Reconnect with Exponential Backoff](/websocket-connection#reconnect-with-exponential-backoff)
+
+### "429" on subscription
+
+**Cause:** You've hit the subscription limit (100 per connection or 50 connections per merchant).
+
+**Solutions:**
+1. Unsubscribe from topics you no longer need
+2. Consolidate — use one connection with multiple subscriptions rather than one connection per match
+3. Clean up subscriptions when matches finish (see [Cleanup Patterns](/websocket-subscriptions#cleanup-patterns))
+
+---
+
+## Stream Playback Issues
+
+### Stream URL returns 403
+
+**Cause:** Geo-blocking or the stream URL has expired.
+
+**Solutions:**
+1. Re-fetch stream URLs from `GET /matches/{id}?include=streams` — the URL may have been refreshed
+2. Try a different stream from the response (different providers may have different geo-restrictions)
+3. If all streams return 403, the content may not be available in the user's region
+
+### Stream URL returns 404
+
+**Cause:** Stream not yet available or URL has expired.
+
+**Solutions:**
+1. Check if the match has started — streams typically become available ~30 minutes before the scheduled start time
+2. Re-fetch fresh URLs from the API
+3. If the match has ended, stream URLs are no longer valid (~1 hour after match end)
+
+### HLS.js / flv.js player not loading
+
+**Possible causes:**
+1. CORS error — upstream stream provider may block cross-origin requests
+2. Player library not compatible with the stream format
+3. Stream URL format mismatch
+
+**Debug steps:**
+1. Open browser DevTools > Network tab and check for CORS errors on the stream request
+2. Verify the stream `format` field matches your player (HLS.js for `m3u8`, flv.js for `flv`)
+3. Test the stream URL directly in VLC or `ffplay` to confirm the stream itself is working
+
+<Info>
+For CORS issues with stream URLs, see the CORS proxy guidance in [Stream Playback](/stream-playback#cors-proxy-for-web-playback).
+</Info>
+
+---
+
+## Debugging Checklist
+
+When something isn't working, run through this checklist:
+
+1. **Token valid?** — Decode and check `exp` claim
+2. **Correct environment?** — staging vs production URLs
+3. **Headers correct?** — `Authorization: Bearer <token>` and `Content-Type: application/json`
+4. **Rate limited?** — Check `X-RateLimit-Remaining` in response headers
+5. **Filters valid?** — Verify IDs by calling `/sports` and `/leagues` first
+6. **WebSocket auth?** — Sent within 5 seconds, getting `auth_success` back?
+7. **Heartbeat active?** — Pinging every 30 seconds?
+8. **Logs?** — Log request URLs, response status codes, and WebSocket message types
+
+### Minimal Test Script
+
+Use this to verify your connection is working:
+
+```bash
+# 1. Get token (replace with your actual HMAC signing logic)
+MERCHANT_CODE="your-merchant-code"
+MERCHANT_SECRET="your-merchant-secret"
+TIMESTAMP=$(date +%s)
+NONCE=$(uuidgen | tr '[:upper:]' '[:lower:]')
+
+CANONICAL="merchant_code:${MERCHANT_CODE}
+timestamp:${TIMESTAMP}
+nonce:${NONCE}
+method:POST
+path:/v1/auth/token"
+
+SIGNATURE=$(echo -n "$CANONICAL" | openssl dgst -sha256 -hmac "$MERCHANT_SECRET" | awk '{print $2}')
+
+TOKEN=$(curl -s -X POST https://staging-api.agg.example.com/v1/auth/token \
+  -H "Content-Type: application/json" \
+  -d "{\"merchant_code\":\"${MERCHANT_CODE}\",\"timestamp\":${TIMESTAMP},\"nonce\":\"${NONCE}\",\"signature\":\"${SIGNATURE}\"}" \
+  | jq -r '.access_token')
+
+echo "Token: ${TOKEN:0:20}..."
+
+# 2. Test REST
+echo "Sports:"
+curl -s https://staging-api.agg.example.com/v1/sports \
+  -H "Authorization: Bearer $TOKEN" | jq '.data | length'
+
+# 3. Test matches
+echo "Live matches:"
+curl -s "https://staging-api.agg.example.com/v1/matches?status=live" \
+  -H "Authorization: Bearer $TOKEN" | jq '.data | length'
+```
+
+If this script works, your credentials and network are fine — the issue is in your application code.
+
+---
+
+## Still Stuck?
+
+If you've gone through the checklist and still can't resolve the issue:
+
+1. Collect the relevant logs (request/response, WebSocket messages, error codes)
+2. Note your `merchant_id` and the timestamp of the issue
+3. Contact your account manager or AGG support with these details

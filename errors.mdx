@@ -1,0 +1,128 @@
+---
+title: "Error Codes"
+description: "Understanding AGG API and WebSocket error codes"
+---
+
+# Error Codes
+
+AGG provides consistent error responses across all APIs to help developers quickly identify and resolve issues.
+
+## Global Error Format
+
+Every API error response follows a standard JSON structure containing a `code` and a descriptive `message`.
+
+```json
+{
+  "code": 404,
+  "message": "Match not found"
+}
+```
+
+- `code` (integer or string): The HTTP status code or a specific application error code.
+- `message` (string): A human-readable description of the error.
+
+## Error Recovery Matrix
+
+| Code | Status | Retryable | Action |
+|------|--------|-----------|--------|
+| `400` | Bad Request | No | Fix the request — check params, JSON format, filter values |
+| `401` | Unauthorized | Yes | Refresh your JWT token, then retry (max 3 attempts) |
+| `403` | Forbidden | No | You lack required scopes — contact your account manager |
+| `404` | Not Found | Maybe | If match not yet available, retry after 5 minutes; otherwise, the resource doesn't exist |
+| `429` | Too Many Requests | Yes | Wait until `X-RateLimit-Reset` timestamp, then retry |
+| `500` | Internal Server Error | Yes | Exponential backoff — retry after 1s, 2s, 4s, up to max 5 retries |
+
+## When to Stop Retrying
+
+<Warning>
+Aggressive retries on non-retryable errors (400, 403) waste your rate limit budget and won't fix the issue. Always check the error code before retrying.
+</Warning>
+
+- **401:** Stop after 3 token refresh attempts — if it still fails, your credentials may be revoked
+- **429:** Always respect `X-RateLimit-Reset` — retrying before the reset time will keep failing
+- **500:** Stop after 5 retries — if the server is consistently failing, the issue is on our side. Contact support
+- **All others:** Non-retryable errors should not be retried. Fix the root cause
+
+## Common HTTP Errors
+
+The REST API utilizes standard HTTP status codes to indicate the success or failure of an API request.
+
+| Code | Status | Description |
+| ---- | ------ | ----------- |
+| `400` | Bad Request | The request was invalid or cannot be served. This could be due to missing required parameters, malformed JSON, or invalid filter values. |
+| `401` | Unauthorized | Authentication failed. This usually means your JWT token is missing, invalid, or expired. |
+| `403` | Forbidden | You are authenticated, but you do not have permission to access the requested resource or perform the action. |
+| `404` | Not Found | The requested resource (e.g., a specific match ID or endpoint) could not be found. |
+| `429` | Too Many Requests | You have exceeded the rate limit. You must wait before making further requests. See [Rate Limits](/rate-limits). |
+| `500` | Internal Server Error | An unexpected error occurred on the AGG servers. If this persists, please contact support. |
+
+### Example 400 Bad Request
+
+```json
+{
+  "code": 400,
+  "message": "Invalid sport_id: 'abc'. Must be an integer."
+}
+```
+
+### Example 401 Unauthorized
+
+```json
+{
+  "code": 401,
+  "message": "Token expired at 2024-03-15T12:00:00Z."
+}
+```
+
+<Info>
+Always include your `merchant_id` and the request timestamp when contacting support — this helps us locate the issue in our logs quickly.
+</Info>
+
+## Logging Best Practices
+
+When handling errors, log the following for debugging:
+
+- HTTP status code and response body
+- Request URL and method
+- Timestamp of the request
+- Your `merchant_id` (from the JWT token)
+- The `X-RateLimit-Remaining` header value (for 429 debugging)
+
+This information will help AGG support diagnose issues faster if you need to escalate.
+
+## WebSocket Errors
+
+WebSocket errors are communicated via standard WebSocket Close Codes or specific error messages before the connection drops.
+
+| Close Code | Reason | Description |
+| ---------- | ------ | ----------- |
+| `1000` | Normal Closure | The connection was closed normally by the client or server. |
+| `1001` | Going Away | The server is shutting down or restarting. Clients should reconnect. |
+| `1002` | Protocol Error | The client sent a message that violates the protocol (e.g., invalid JSON). |
+| `1003` | Unsupported Data | The server received an unsupported data type (e.g., binary instead of text). |
+| `1008` | Policy Violation | The client violated a policy, such as failing to authenticate within 5 seconds or exceeding message rate limits. |
+| `1011` | Internal Error | The server encountered an unexpected condition preventing it from fulfilling the request. |
+
+### Example WebSocket Error Message
+
+If a subscription fails, you will receive an error message before the connection potentially closes:
+
+```json
+{
+  "type": "subscribe_error",
+  "topic": "match:99999999",
+  "code": 404,
+  "message": "Match not found"
+}
+```
+
+## Related Pages
+
+<CardGroup cols={2}>
+  <Card title="Rate Limits" icon="gauge" href="/rate-limits">
+    Rate limit budgets and 429 handling strategies
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/guides/troubleshooting">
+    Common issues, debugging tips, and solutions
+  </Card>
+</CardGroup>

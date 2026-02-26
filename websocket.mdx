@@ -1,0 +1,175 @@
+---
+title: "WebSocket Overview"
+description: "Understanding real-time data delivery with WebSockets"
+---
+
+While the REST API is suitable for initial data loads and polling, the **WebSocket API** delivers low-latency, real-time updates for live matches.
+
+## What Data is Real-Time?
+
+- **Live Scores:** Instant updates when a team scores
+- **Match Status:** Changes in match state (e.g., `scheduled` → `live`, `1H` → `HT`, `completed`)
+- **Time Updates:** Regular ticks for the current match clock
+- **Incidents:** Goals, red/yellow cards, substitutions, VAR decisions
+- **Statistics Updates:** Possession, shots, corners, fouls
+- **Stream Status:** Stream availability and signal changes
+
+## Topic Model
+
+AGG uses colon-separated topics with two granularity levels:
+
+| Topic | Data Level | Use Case |
+|-------|-----------|----------|
+| `match:{id}` | Full detail | Match detail page — incidents, stats, stream changes |
+| `matches:live` | Lightweight | Dashboard — score/status changes across all live matches |
+| `matches:league:{id}` | Lightweight | League view — score/status changes for one league |
+| `matches:sport:{id}` | Lightweight | Sport view — score/status changes for one sport |
+
+See [Subscriptions](/websocket-subscriptions) for the full topic reference.
+
+## Connection Lifecycle
+
+<Steps>
+  <Step title="Connect">
+    Open a WebSocket connection to `wss://ws.agg.example.com/ws`
+  </Step>
+  <Step title="Authenticate">
+    Send an `auth` message with your JWT token within 5 seconds
+  </Step>
+  <Step title="Subscribe">
+    Send `subscribe` messages for the topics you want
+  </Step>
+  <Step title="Listen">
+    Receive real-time events on subscribed topics
+  </Step>
+  <Step title="Heartbeat">
+    Send `ping` messages every 30 seconds to keep the connection alive
+  </Step>
+  <Step title="Disconnect">
+    Close when done, or handle server-initiated disconnects
+  </Step>
+</Steps>
+
+## Complete Working Example
+
+```javascript
+const WebSocket = require('ws');
+
+const WS_URL = 'wss://ws.agg.example.com/ws';
+const TOKEN = 'your-jwt-token';
+const MATCH_ID = 'prov-60154495';
+
+const ws = new WebSocket(WS_URL);
+
+ws.on('open', () => {
+  console.log('Connected — sending auth...');
+  ws.send(JSON.stringify({ type: 'auth', token: TOKEN }));
+});
+
+ws.on('message', (raw) => {
+  const msg = JSON.parse(raw);
+
+  switch (msg.type) {
+    case 'auth_success':
+      console.log('Authenticated — subscribing...');
+      // Subscribe to live matches overview
+      ws.send(JSON.stringify({ type: 'subscribe', topic: 'matches:live' }));
+      // Subscribe to a specific match for full detail
+      ws.send(JSON.stringify({ type: 'subscribe', topic: `match:${MATCH_ID}` }));
+      break;
+
+    case 'subscribe_success':
+      console.log(`Subscribed to ${msg.topic}`);
+      break;
+
+    case 'score_update':
+      const id = msg.match_id || MATCH_ID;
+      console.log(`[${id}] Score: ${msg.home_score} - ${msg.away_score}`);
+      break;
+
+    case 'incident':
+      console.log(`${msg.data.incident_type} at ${msg.data.minute}' — ${msg.data.player_name}`);
+      break;
+
+    case 'match_added':
+      console.log(`New live match: ${msg.data.home_team} vs ${msg.data.away_team}`);
+      break;
+
+    case 'match_removed':
+      console.log(`Match ${msg.match_id} ${msg.reason}`);
+      break;
+
+    default:
+      console.log('Event:', msg.type, msg);
+  }
+});
+
+// Heartbeat every 30 seconds
+const heartbeat = setInterval(() => {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'ping' }));
+  }
+}, 30000);
+
+ws.on('close', (code, reason) => {
+  clearInterval(heartbeat);
+  console.log(`Disconnected: ${code} — ${reason}`);
+});
+```
+
+## Authentication
+
+<Warning>
+You must send the `auth` message within **5 seconds** of connecting. If the server doesn't receive a valid token in time, it will close the connection with code `1008`.
+</Warning>
+
+## Heartbeat (Ping/Pong)
+
+Send `ping` every 30 seconds. The server replies with `pong`. If no message is received from you for 60 seconds, the server closes the connection.
+
+```json
+{"type": "ping"}
+```
+```json
+{"type": "pong"}
+```
+
+## Connection Pooling
+
+- Open **one WebSocket connection** and subscribe to multiple topics
+- The server supports up to **50 concurrent connections** per merchant
+- Group subscriptions by use case: one connection for the dashboard (`matches:live`), another for a detail view (`match:{id}`)
+
+## REST Polling Fallback
+
+If WebSocket is unavailable (e.g., corporate firewalls), fall back to REST polling:
+
+1. Poll `GET /v1/matches?status=live` every 30 seconds for live match list
+2. Poll `GET /v1/matches/{id}` every 15-30 seconds for match details
+
+<Warning>
+REST polling is significantly less efficient than WebSocket and will consume your rate limit budget faster. Use WebSocket whenever possible.
+</Warning>
+
+## Reconnect Strategy
+
+1. **Listen for close events** on your WebSocket instance
+2. **Exponential backoff:** Retry after 1s, 2s, 4s, 8s, up to max 30s
+3. **Re-authenticate and re-subscribe:** Subscriptions are not persisted across disconnects
+
+## Related Pages
+
+<CardGroup cols={2}>
+  <Card title="Connection Guide" icon="plug" href="/websocket-connection">
+    Connect, authenticate, heartbeat, and reconnect
+  </Card>
+  <Card title="Subscriptions" icon="bell" href="/websocket-subscriptions">
+    Topics, subscribe/unsubscribe, and limits
+  </Card>
+  <Card title="Event Payloads" icon="message" href="/websocket-events">
+    Detailed payloads for each event type
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/guides/troubleshooting#websocket-issues">
+    Common WebSocket issues and fixes
+  </Card>
+</CardGroup>

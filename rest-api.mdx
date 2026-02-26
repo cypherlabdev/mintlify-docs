@@ -1,0 +1,199 @@
+---
+title: "REST API Overview"
+description: "Understanding how to interact with AGG REST APIs"
+---
+
+The REST API serves as the primary method for initializing data and fetching historical states before subscribing to real-time WebSockets.
+
+It is designed for stateless, request-response interactions and is perfect for:
+- Initial data loading (Sports, Leagues, Matches)
+- Filtering and Pagination
+- Polling (if WebSockets are unavailable or unneeded)
+
+<Note>
+The REST API is *not* real-time. For low-latency live scores, incidents, and match status updates, you must use the WebSocket API.
+</Note>
+
+## REST vs WebSocket: When to Use Which
+
+| Scenario | Use REST | Use WebSocket |
+|----------|----------|---------------|
+| Initial page load (sports, leagues) | Yes | No |
+| Fetching match list with filters | Yes | No |
+| Live score updates on a dashboard | No | Yes (`matches:live`) |
+| Real-time goal/card notifications | No | Yes (`match:{id}`) |
+| Live statistics widget | No | Yes (`match:{id}`) |
+| Fetching stream URLs | Yes | No |
+| Historical match data | Yes | No |
+| Environments without persistent connections | Yes (polling) | No |
+
+<Info>
+**Best practice:** Use REST to load the initial state, then switch to WebSocket for real-time updates. This gives you fast page loads with live data.
+</Info>
+
+## Caching Recommendations
+
+To reduce unnecessary API calls and improve performance:
+
+| Resource | Suggested Cache TTL | Reason |
+|----------|-------------------|--------|
+| `/sports` | 24 hours | Sports list rarely changes |
+| `/leagues` | 24 hours | Leagues rarely change mid-season |
+| `/matches?status=scheduled` | 5 minutes | Schedule can change close to match time |
+| `/matches?status=live` | Do not cache | Use WebSocket instead |
+| `/matches/{id}` | 30 seconds | Use WebSocket for real-time, REST for initial load |
+| `/matches/{id}?include=streams` | 5 minutes | Stream URLs are stable once available |
+
+## Pagination
+
+Endpoints that return lists (e.g., `/matches`) support pagination using `page` and `limit` query parameters.
+
+- `page` (integer): The page number, starting at 1. Default: 1.
+- `limit` (integer): The number of items per page. Maximum: 100. Default: 20.
+
+```http
+GET /v1/matches?page=2&limit=50
+```
+
+The response metadata will include pagination details:
+
+```json
+{
+  "meta": {
+    "page": 2,
+    "limit": 50,
+    "total": 350
+  }
+}
+```
+
+<Info>
+**Pagination best practice:** Use a reasonable `limit` (20-50). Requesting `limit=100` on every call increases response time and consumes more rate limit budget.
+</Info>
+
+## Filtering & Sorting
+
+<Tabs>
+  <Tab title="Filtering">
+    You can filter results using specific query parameters on supported endpoints. Common filters include:
+
+    - `sport_id` (string): Filter by a specific sport.
+    - `league_id` (string): Filter by a specific league.
+    - `status` (string): Filter by match status (e.g., `live`, `scheduled`, `completed`).
+
+    Filters can be combined:
+
+    ```http
+    GET /v1/matches?sport_id=1&league_id=39&status=live
+    ```
+  </Tab>
+  <Tab title="Sorting">
+    Sorting is available on lists using the `sort` parameter. Prefix the field name with a minus sign (`-`) for descending order.
+
+    - `sort=start_time` (Ascending)
+    - `sort=-start_time` (Descending)
+
+    ```http
+    GET /v1/matches?sort=-start_time
+    ```
+  </Tab>
+</Tabs>
+
+## Common Response Wrapper
+
+Every REST API response is enveloped in a standard JSON wrapper to ensure consistency.
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    // Array or Object
+  },
+  "meta": {
+    // Pagination data, if applicable
+  }
+}
+```
+
+## Enumerated Values
+
+<AccordionGroup>
+  <Accordion title="Match Status Values">
+    Matches can have the following `status` values:
+
+    | Status | Description |
+    |--------|-------------|
+    | `scheduled` | Match has not started yet |
+    | `live` | Match is currently in progress |
+    | `halftime` | Match is at half-time break |
+    | `completed` | Match has ended |
+    | `postponed` | Match has been postponed |
+    | `cancelled` | Match has been cancelled |
+  </Accordion>
+
+  <Accordion title="Game Stage Values">
+    The `game_stage` field indicates the current phase of a live match. Available stages vary by sport — the table below shows common values for football (soccer). Other sports may use different stage identifiers.
+
+    | Stage | Description |
+    |-------|-------------|
+    | `1H` | First half / first period |
+    | `HT` | Half-time / intermission |
+    | `2H` | Second half / second period |
+    | `ET` | Extra time / overtime |
+    | `PEN` | Penalty shootout |
+    | `FT` | Full time / final |
+
+    <Info>
+    Game stage values are normalized from upstream providers. If a sport does not have a concept of "halves" (e.g., tennis, basketball quarters), the stage values will differ. Always treat `game_stage` as a string — do not hard-code against a fixed set.
+    </Info>
+  </Accordion>
+
+  <Accordion title="Incident Types">
+    Events returned in the `incidents` section of `/matches/{id}` have the following `type` values:
+
+    | Type | Description |
+    |------|-------------|
+    | `goal` | Goal scored |
+    | `own_goal` | Own goal |
+    | `yellow_card` | Yellow card shown |
+    | `red_card` | Red card shown |
+    | `substitution` | Player substitution |
+    | `var_decision` | VAR review decision |
+    | `penalty` | Penalty awarded/taken |
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Polling Recommendations
+
+If you cannot use WebSocket for real-time updates, use these polling intervals:
+
+| Endpoint | Interval | Notes |
+|----------|----------|-------|
+| `/matches?status=live` | 30 seconds | For live dashboards |
+| `/matches/{id}` | 15-30 seconds | For match detail pages |
+| `/matches?status=scheduled` | 5 minutes | Schedule rarely changes |
+| `/sports`, `/leagues` | Once per day | Static data |
+
+<Warning>
+Do not poll `/matches?status=live` more frequently than every 30 seconds. For real-time updates, use the [WebSocket API](/websocket) instead — it's more efficient and won't consume your rate limit budget.
+</Warning>
+
+## Related Pages
+
+<CardGroup cols={2}>
+  <Card title="API Playground" icon="play" href="/api-playground">
+    Test endpoints interactively with live requests
+  </Card>
+  <Card title="WebSocket API" icon="wifi" href="/websocket">
+    Real-time alternative to REST polling
+  </Card>
+  <Card title="Rate Limits" icon="gauge" href="/rate-limits">
+    Rate limit budgets and backoff strategies
+  </Card>
+  <Card title="Error Codes" icon="circle-exclamation" href="/errors">
+    Error recovery matrix and retry guidance
+  </Card>
+</CardGroup>

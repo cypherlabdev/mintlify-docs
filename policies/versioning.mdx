@@ -1,0 +1,41 @@
+---
+title: "Versioning & Support"
+description: "API versioning strategy, support policy, and breaking changes"
+---
+
+AGG API and WebSocket protocols are versioned to ensure backward compatibility and smooth integrations for all clients.
+
+## Versioning Strategy
+
+The API version is included in the base URL:
+
+- REST API: `https://api.agg.example.com/v1`
+- WebSocket: `wss://ws.agg.example.com/ws`
+
+When backwards-incompatible changes are introduced, the version number will be incremented (e.g., to `v2`).
+
+Backwards-compatible changes (e.g., adding new fields to a response, introducing new endpoints) will not change the version number.
+
+<Info>
+Your client code must be resilient to receiving **new fields** in JSON responses. Never fail on unknown fields — simply ignore them. This allows us to add features without breaking your integration.
+</Info>
+
+## Support Policy
+
+| Version | Status | Support |
+|---------|--------|---------|
+| v1 | Current | Full support — bug fixes, new features, security patches |
+
+When a new major version is released:
+
+- The previous version enters a **12-month deprecation period**
+- During deprecation, the old version receives security patches only
+- After deprecation, the old version is sunset and may be removed
+
+## Breaking Change Communication
+
+When a breaking change is planned:
+
+1. Announced via email to all registered merchants **at least 90 days** before release
+2. Documented in the [Changelog](/changelog) with migration guides
+3. Available in the **staging environment** for testing at least 30 days before production rollout

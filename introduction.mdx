@@ -1,0 +1,87 @@
+---
+title: "Introduction"
+description: "Welcome to the AGG API Documentation"
+---
+
+Welcome to the **AGG Aggregator Platform** API documentation.
+
+AGG is a specialized sports data aggregation platform that unifies match data, live scores, statistics, and streaming URLs from multiple upstream providers into a single, cohesive interface.
+
+## What Problems It Solves
+
+Integrating with multiple sports data and streaming providers is complex. Providers have different API structures, authentication mechanisms, and rate limits. AGG simplifies this by providing a unified, standardized interface. You integrate once with AGG, and you get access to all underlying providers automatically.
+
+## Use Cases
+
+AGG powers a wide range of client applications:
+
+<CardGroup cols={2}>
+  <Card title="Live Sports Dashboard" icon="chart-network">
+    Display live scores, match status, and statistics across multiple sports and leagues in real-time.
+  </Card>
+  <Card title="Real-Time Analytics" icon="bolt">
+    Consume real-time match events (goals, cards, VAR decisions) to power live analytics dashboards and push notifications.
+  </Card>
+  <Card title="Stream Aggregator" icon="play">
+    Fetch and present multiple stream URLs (m3u8, flv, rtmp) with player fallback logic.
+  </Card>
+  <Card title="Fantasy Sports App" icon="trophy">
+    Pull player-level match events and statistics for fantasy scoring.
+  </Card>
+</CardGroup>
+
+## Why AGG vs Direct Integrations
+
+| | AGG | Direct Provider Integrations |
+|---|---|---|
+| **Integration effort** | Single API, single auth | N providers, N APIs, N auth flows |
+| **Data normalization** | Unified schema across all providers | Different schemas per provider |
+| **Stream aggregation** | All stream URLs in one response | Separate calls per provider |
+| **Real-time delivery** | WebSocket with unified event types | Varies: polling, webhooks, SSE |
+| **Maintenance** | AGG handles upstream changes | You maintain each integration |
+
+## Supported Protocols
+
+AGG exposes data through two primary protocols to cater to different integration needs:
+
+<CardGroup cols={2}>
+  <Card title="REST API" icon="server" href="/rest-api">
+    Used for initial data loads, historical data, fetching static structures (sports, leagues), and environments where WebSockets are not supported.
+  </Card>
+  <Card title="WebSocket API" icon="wifi" href="/websocket">
+    Designed for real-time updates. It delivers low-latency live scores, match status changes, incidents, and live statistics.
+  </Card>
+</CardGroup>
+
+## Scope & Limitations
+
+<Warning>
+AGG only aggregates and distributes stream **URLs** — we do not host video content, transcode streams, or provide CDN services. Your application is responsible for video playback using the provided URLs.
+</Warning>
+
+* **Agnostic:** AGG abstracts away the specific upstream providers. You do not need to know which provider a stream or match comes from.
+
+## Sports Coverage
+
+AGG currently aggregates data exclusively for:
+
+- **Football (Soccer)**
+
+Contact your account manager for the latest coverage details and available leagues.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Getting Started" icon="rocket" href="/getting-started">
+    Base URLs, environments, and response format
+  </Card>
+  <Card title="Quickstart" icon="code" href="/guides/quickstart">
+    First API call in 5 minutes with code examples
+  </Card>
+  <Card title="API Reference" icon="rectangle-terminal" href="/endpoints/list-matches">
+    Explore the full REST API endpoint specifications
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/integration-architecture">
+    Review common integration patterns
+  </Card>
+</CardGroup>

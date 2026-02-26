@@ -1,0 +1,223 @@
+---
+title: "WebSocket Connection"
+description: "How to connect and authenticate to the WebSocket API"
+---
+
+Connecting to the AGG WebSocket API requires a valid JWT access token obtained from `POST /auth/token`.
+
+## Connection URL
+
+**Production:** `wss://ws.agg.example.com/ws`
+
+**Staging:** `wss://staging-ws.agg.example.com/ws`
+
+## Hello World
+
+<CodeGroup>
+
+```javascript JavaScript
+const WebSocket = require('ws');
+const ws = new WebSocket('wss://ws.agg.example.com/ws');
+
+ws.on('open', () => {
+  ws.send(JSON.stringify({ type: 'auth', token: 'YOUR_JWT_TOKEN' }));
+});
+
+ws.on('message', (data) => {
+  const msg = JSON.parse(data);
+  console.log(msg.type, msg);
+});
+```
+
+```python Python
+import asyncio
+import websockets
+import json
+
+async def connect():
+    async with websockets.connect('wss://ws.agg.example.com/ws') as ws:
+        await ws.send(json.dumps({'type': 'auth', 'token': 'YOUR_JWT_TOKEN'}))
+        async for message in ws:
+            msg = json.loads(message)
+            print(msg['type'], msg)
+
+asyncio.run(connect())
+```
+
+```go Go
+package main
+
+import (
+    "encoding/json"
+    "fmt"
+    "log"
+    "github.com/gorilla/websocket"
+)
+
+func main() {
+    conn, _, err := websocket.DefaultDialer.Dial("wss://ws.agg.example.com/ws", nil)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer conn.Close()
+
+    auth := map[string]string{"type": "auth", "token": "YOUR_JWT_TOKEN"}
+    conn.WriteJSON(auth)
+
+    for {
+        _, msg, err := conn.ReadMessage()
+        if err != nil {
+            log.Fatal(err)
+        }
+        var data map[string]interface{}
+        json.Unmarshal(msg, &data)
+        fmt.Println(data["type"], string(msg))
+    }
+}
+```
+
+</CodeGroup>
+
+## Authentication
+
+<Warning>
+You have exactly **5 seconds** after connection to send the `auth` message. If the server doesn't receive a valid token in this window, it will close the connection with code `1008`.
+</Warning>
+
+<Tabs>
+  <Tab title="Request">
+```json
+{
+  "type": "auth",
+  "token": "eyJhbGciOiJIUzI1NiIsInR..."
+}
+```
+  </Tab>
+  <Tab title="Success">
+```json
+{
+  "type": "auth_success",
+  "message": "Authenticated successfully."
+}
+```
+  </Tab>
+  <Tab title="Error">
+```json
+{
+  "type": "auth_error",
+  "code": 401,
+  "message": "Invalid or expired token."
+}
+```
+  </Tab>
+</Tabs>
+
+## Token Expiry During Active Connection
+
+If your JWT token expires while the WebSocket connection is active, the server will close the connection. Handle this by:
+
+<Steps>
+  <Step title="Track Expiry">
+    Track token expiry time locally (from the `exp` claim or `expires_in` value)
+  </Step>
+  <Step title="Proactive Reconnect">
+    Proactively disconnect and reconnect with a fresh token **before** expiry
+  </Step>
+  <Step title="Handle Drops">
+    If the server closes the connection unexpectedly, check if your token has expired before attempting reconnect
+  </Step>
+</Steps>
+
+```javascript
+const TOKEN_REFRESH_BUFFER = 5 * 60 * 1000; // 5 minutes before expiry
+
+function scheduleReconnect(expiresIn) {
+  const reconnectIn = expiresIn * 1000 - TOKEN_REFRESH_BUFFER;
+  setTimeout(async () => {
+    const newToken = await tokenManager.getToken();
+    ws.close();
+    // Reconnect with new token (handled by onclose + reconnect logic)
+  }, reconnectIn);
+}
+```
+
+## Heartbeat (Ping/Pong)
+
+To keep the connection alive, send a `ping` message every 30 seconds.
+
+<Tabs>
+  <Tab title="Client Request">
+```json
+{"type": "ping"}
+```
+  </Tab>
+  <Tab title="Server Response">
+```json
+{"type": "pong"}
+```
+  </Tab>
+</Tabs>
+
+If the server does not receive a `ping` (or any other message) for 60 seconds, it will close the connection.
+
+<Info>
+Set your ping interval to 30 seconds. If your connection drops unexpectedly, a missing heartbeat is often the cause.
+</Info>
+
+## Reconnect with Exponential Backoff
+
+```javascript
+function createReconnectingWebSocket(url, getToken) {
+  let retryDelay = 1000;
+  const MAX_DELAY = 30000;
+  let ws;
+  let subscriptions = new Set();
+
+  async function connect() {
+    const token = await getToken();
+    ws = new WebSocket(url);
+
+    ws.on('open', () => {
+      retryDelay = 1000;
+      ws.send(JSON.stringify({ type: 'auth', token }));
+    });
+
+    ws.on('message', (raw) => {
+      const msg = JSON.parse(raw);
+
+      if (msg.type === 'auth_success') {
+        // Re-subscribe to all previous topics
+        subscriptions.forEach(topic => {
+          ws.send(JSON.stringify({ type: 'subscribe', topic }));
+        });
+      }
+
+      // Handle other messages...
+    });
+
+    ws.on('close', (code) => {
+      console.log(`Connection closed (${code}), reconnecting in ${retryDelay}ms...`);
+      setTimeout(connect, retryDelay);
+      retryDelay = Math.min(retryDelay * 2, MAX_DELAY);
+    });
+  }
+
+  connect();
+
+  return {
+    subscribe(topic) {
+      subscriptions.add(topic);
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'subscribe', topic }));
+      }
+    },
+    unsubscribe(topic) {
+      subscriptions.delete(topic);
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'unsubscribe', topic }));
+      }
+    },
+    getSocket: () => ws
+  };
+}
+```

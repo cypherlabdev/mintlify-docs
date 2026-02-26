@@ -1,0 +1,271 @@
+---
+title: "Quickstart"
+description: "First API Call in 5 Minutes — from zero to live match data"
+---
+
+This guide walks you through making your first AGG API calls. By the end, you'll have fetched live match data and stream URLs.
+
+## Prerequisites
+
+- API credentials (`merchant_code` and `merchant_secret`) from the [Dashboard](https://dashboard.agg.example.com)
+- A tool for making HTTP requests (cURL, Postman, or any HTTP client library)
+
+---
+
+<Steps>
+  <Step title="Get Your Access Token">
+    Authenticate using HMAC-signed credentials to receive an access token.
+
+<CodeGroup>
+
+```bash cURL
+MERCHANT_CODE="YOUR_MERCHANT_CODE"
+MERCHANT_SECRET="YOUR_MERCHANT_SECRET"
+TIMESTAMP=$(date +%s)
+NONCE=$(uuidgen)
+
+CANONICAL="merchant_code:${MERCHANT_CODE}\ntimestamp:${TIMESTAMP}\nnonce:${NONCE}\nmethod:POST\npath:/v1/auth/token"
+SIGNATURE=$(printf "$CANONICAL" | openssl dgst -sha256 -hmac "$MERCHANT_SECRET" -hex | awk '{print $2}')
+
+curl -X POST https://staging-api.agg.example.com/v1/auth/token \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"merchant_code\": \"${MERCHANT_CODE}\",
+    \"timestamp\": ${TIMESTAMP},
+    \"nonce\": \"${NONCE}\",
+    \"signature\": \"${SIGNATURE}\"
+  }"
+```
+
+```javascript JavaScript
+import crypto from 'crypto';
+
+const merchantCode = 'YOUR_MERCHANT_CODE';
+const merchantSecret = 'YOUR_MERCHANT_SECRET';
+const timestamp = Math.floor(Date.now() / 1000);
+const nonce = crypto.randomUUID();
+
+const canonical = `merchant_code:${merchantCode}\ntimestamp:${timestamp}\nnonce:${nonce}\nmethod:POST\npath:/v1/auth/token`;
+const signature = crypto.createHmac('sha256', merchantSecret).update(canonical).digest('hex');
+
+const res = await fetch('https://staging-api.agg.example.com/v1/auth/token', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ merchant_code: merchantCode, timestamp, nonce, signature })
+});
+const { access_token } = await res.json();
+```
+
+```python Python
+import hmac, hashlib, time, uuid, requests
+
+merchant_code = 'YOUR_MERCHANT_CODE'
+merchant_secret = 'YOUR_MERCHANT_SECRET'
+timestamp = int(time.time())
+nonce = str(uuid.uuid4())
+
+canonical = f"merchant_code:{merchant_code}\ntimestamp:{timestamp}\nnonce:{nonce}\nmethod:POST\npath:/v1/auth/token"
+signature = hmac.new(merchant_secret.encode(), canonical.encode(), hashlib.sha256).hexdigest()
+
+res = requests.post('https://staging-api.agg.example.com/v1/auth/token', json={
+    'merchant_code': merchant_code,
+    'timestamp': timestamp,
+    'nonce': nonce,
+    'signature': signature
+})
+access_token = res.json()['access_token']
+```
+
+</CodeGroup>
+
+You'll receive a response like:
+
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "scope": "read:matches read:streams read:sports read:leagues"
+}
+```
+
+<Info>
+Tokens expire after 1 hour. See [Authentication](/authentication#token-refresh-pattern) for how to handle refresh.
+</Info>
+  </Step>
+
+  <Step title="Browse Available Sports">
+    Use your token to fetch the list of supported sports.
+
+<CodeGroup>
+
+```bash cURL
+curl https://staging-api.agg.example.com/v1/sports \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+```javascript JavaScript
+const sports = await fetch('https://staging-api.agg.example.com/v1/sports', {
+  headers: { Authorization: `Bearer ${access_token}` }
+}).then(r => r.json());
+
+console.log(sports.data);
+// [{ "id": "1", "name": "Football" }, ...]
+```
+
+```python Python
+sports = requests.get('https://staging-api.agg.example.com/v1/sports',
+    headers={'Authorization': f'Bearer {access_token}'}
+).json()
+
+print(sports['data'])
+```
+
+</CodeGroup>
+  </Step>
+
+  <Step title="Get Leagues for a Sport">
+    Pick a sport ID from the previous step and fetch its leagues.
+
+<CodeGroup>
+
+```bash cURL
+curl "https://staging-api.agg.example.com/v1/leagues?sport_id=1" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+```javascript JavaScript
+const leagues = await fetch('https://staging-api.agg.example.com/v1/leagues?sport_id=1', {
+  headers: { Authorization: `Bearer ${access_token}` }
+}).then(r => r.json());
+
+console.log(leagues.data);
+// [{ "id": "39", "name": "Premier League", "sport_id": "1" }, ...]
+```
+
+```python Python
+leagues = requests.get('https://staging-api.agg.example.com/v1/leagues?sport_id=1',
+    headers={'Authorization': f'Bearer {access_token}'}
+).json()
+
+print(leagues['data'])
+```
+
+</CodeGroup>
+  </Step>
+
+  <Step title="Fetch Live Matches">
+    Get all currently live matches, optionally filtered by sport or league.
+
+<CodeGroup>
+
+```bash cURL
+curl "https://staging-api.agg.example.com/v1/matches?status=live" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+```javascript JavaScript
+const matches = await fetch('https://staging-api.agg.example.com/v1/matches?status=live', {
+  headers: { Authorization: `Bearer ${access_token}` }
+}).then(r => r.json());
+
+matches.data.forEach(m => {
+  console.log(`${m.home_team} ${m.home_score} - ${m.away_score} ${m.away_team}`);
+});
+```
+
+```python Python
+matches = requests.get('https://staging-api.agg.example.com/v1/matches?status=live',
+    headers={'Authorization': f'Bearer {access_token}'}
+).json()
+
+for m in matches['data']:
+    print(f"{m['home_team']} {m['home_score']} - {m['away_score']} {m['away_team']}")
+```
+
+</CodeGroup>
+  </Step>
+
+  <Step title="Get Match Details and Streams">
+    Pick a match ID and fetch its full details including stream URLs in a single request using the `include` parameter.
+
+<CodeGroup>
+
+```bash cURL
+curl "https://staging-api.agg.example.com/v1/matches/prov-60154495?include=streams" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+```javascript JavaScript
+const match = await fetch('https://staging-api.agg.example.com/v1/matches/prov-60154495?include=streams', {
+  headers: { Authorization: `Bearer ${access_token}` }
+}).then(r => r.json());
+
+console.log('Match:', match.data);
+console.log('Streams:', match.data.streams);
+```
+
+```python Python
+headers = {'Authorization': f'Bearer {access_token}'}
+
+match = requests.get('https://staging-api.agg.example.com/v1/matches/prov-60154495?include=streams',
+    headers=headers
+).json()
+
+print('Match:', match['data'])
+print('Streams:', match['data']['streams'])
+```
+
+</CodeGroup>
+  </Step>
+
+  <Step title="Subscribe to Real-Time Updates (Optional)">
+    For live score updates, connect to the WebSocket API.
+
+```javascript
+const WebSocket = require('ws');
+
+const ws = new WebSocket('wss://staging-ws.agg.example.com/ws');
+
+ws.on('open', () => {
+  // Authenticate
+  ws.send(JSON.stringify({ type: 'auth', token: access_token }));
+});
+
+ws.on('message', (raw) => {
+  const msg = JSON.parse(raw);
+
+  if (msg.type === 'auth_success') {
+    // Subscribe to live score updates
+    ws.send(JSON.stringify({
+      type: 'subscribe',
+      topic: 'match:prov-60154495'
+    }));
+  }
+
+  if (msg.type === 'score_update') {
+    console.log(`Score: ${msg.home_score} - ${msg.away_score}`);
+  }
+});
+```
+  </Step>
+</Steps>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="lock" href="/authentication">
+    Token refresh patterns and security best practices
+  </Card>
+  <Card title="REST API" icon="code" href="/rest-api">
+    Filtering, pagination, and caching strategies
+  </Card>
+  <Card title="WebSocket API" icon="bolt" href="/websocket">
+    Full real-time integration guide
+  </Card>
+  <Card title="Common Use Cases" icon="book" href="/guides/common-use-cases">
+    Build a dashboard, match detail page, or stream player
+  </Card>
+</CardGroup>

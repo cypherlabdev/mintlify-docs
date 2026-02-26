@@ -1,0 +1,135 @@
+---
+title: "Rate Limits"
+description: "Understanding API and WebSocket rate limits"
+---
+
+# Rate Limits
+
+To ensure high availability and prevent abuse, AGG enforces rate limits on all REST APIs and WebSocket connections. These limits are applied per `merchant_id` (your account).
+
+If you exceed these limits, the API will respond with HTTP `429 Too Many Requests`.
+
+<Warning>
+Rate limits are shared across all your connections and clients. If you have a web backend and mobile apps both calling AGG, they share the same merchant budget.
+</Warning>
+
+## REST API Limits
+
+The standard rate limit for the REST API is:
+
+- **10 requests per second (RPS)** per merchant.
+- **600 requests per minute** per merchant.
+
+These limits are designed to comfortably support polling fallbacks and initial data loads for a large number of clients. If your application requires higher throughput, please contact your account manager to request a limit increase.
+
+### Per-Endpoint Recommendations
+
+| Endpoint | Suggested Poll Interval | Notes |
+|----------|------------------------|-------|
+| `/sports` | Once per day | Rarely changes |
+| `/leagues` | Once per day | Rarely changes |
+| `/matches?status=live` | 30 seconds | Use WebSocket instead if possible |
+| `/matches/{id}` | 15-30 seconds | Use WebSocket for real-time |
+| `/matches/{id}?include=streams` | 5 minutes | Only re-fetch when user is viewing |
+
+### Rate Limit Headers
+
+Every REST API response includes headers detailing your current rate limit status:
+
+```http
+X-RateLimit-Limit: 10
+X-RateLimit-Remaining: 8
+X-RateLimit-Reset: 1710520200
+```
+
+- `X-RateLimit-Limit`: The maximum number of requests permitted in the current time window (1 second).
+- `X-RateLimit-Remaining`: The number of requests remaining in the current time window.
+- `X-RateLimit-Reset`: The UNIX timestamp indicating when the rate limit window resets.
+
+### Rate-Limit-Aware Client
+
+```javascript
+async function aggFetch(url, token) {
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+
+  const remaining = parseInt(res.headers.get('X-RateLimit-Remaining'));
+  const resetAt = parseInt(res.headers.get('X-RateLimit-Reset'));
+
+  if (res.status === 429) {
+    const waitMs = (resetAt * 1000) - Date.now();
+    console.warn(`Rate limited — waiting ${waitMs}ms`);
+    await new Promise(r => setTimeout(r, Math.max(waitMs, 1000)));
+    return aggFetch(url, token); // Retry
+  }
+
+  // Slow down if running low
+  if (remaining < 10) {
+    console.warn(`Rate limit low: ${remaining} remaining`);
+  }
+
+  return res.json();
+}
+```
+
+### Exponential Backoff for 429 Responses
+
+If you receive a `429 Too Many Requests` response, use exponential backoff:
+
+```javascript
+async function fetchWithBackoff(url, token, maxRetries = 5) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    if (res.status !== 429) return res.json();
+
+    const resetAt = parseInt(res.headers.get('X-RateLimit-Reset'));
+    const waitMs = resetAt
+      ? (resetAt * 1000) - Date.now()
+      : Math.min(1000 * Math.pow(2, attempt), 30000);
+
+    await new Promise(r => setTimeout(r, Math.max(waitMs, 1000)));
+  }
+  throw new Error('Rate limit exceeded after max retries');
+}
+```
+
+### Handling 429 Errors
+
+If you receive a `429 Too Many Requests` response, you must pause sending requests until the time specified in the `X-RateLimit-Reset` header.
+
+```json
+{
+  "code": 429,
+  "message": "Rate limit exceeded. Please wait 1 seconds."
+}
+```
+
+## WebSocket Limits
+
+WebSocket connections have distinct rate limits:
+
+- **Max Connections:** 50 concurrent WebSocket connections per merchant.
+- **Message Rate:** 10 messages (e.g., `subscribe`, `ping`) per second per connection.
+- **Message Size:** 128 KB maximum payload size per message.
+
+### WebSocket Burst Handling
+
+The message rate limit (10/second) is enforced with a short burst allowance:
+
+- You can send up to 20 messages in a 1-second burst (e.g., subscribing to many channels at once)
+- Sustained rate must stay under 10 messages/second averaged over 10 seconds
+- If you need to subscribe to many channels on connect, batch them with small delays between groups
+
+### Handling WebSocket Limits
+
+If you exceed the maximum number of concurrent connections, the server will refuse new connections with an HTTP `429` status code during the handshake phase.
+
+If you exceed the message rate or message size limits on an established connection, the server will immediately close the connection with a specific close code (e.g., `1008 Policy Violation`). You will need to implement a backoff reconnect strategy.
+
+<Info>
+The most effective way to reduce rate limit usage is to cache static data (`/sports`, `/leagues`) and switch from REST polling to WebSocket for live match updates.
+</Info>

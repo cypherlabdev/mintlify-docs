@@ -1,0 +1,67 @@
+---
+title: "List Sports"
+description: "Retrieve all available sports"
+api: "GET /sports"
+playground: "simple"
+---
+
+Returns a list of all distinct sports available on the platform. This is typically called once on initial load and cached for 24 hours.
+
+---
+
+## Request
+
+```http
+GET /v1/sports
+Authorization: Bearer <access_token>
+```
+
+### Parameters
+
+_This endpoint has no query parameters._
+
+### Example Request
+
+```bash
+curl https://api.agg.example.com/v1/sports \
+  -H "Authorization: Bearer <access_token>"
+```
+
+---
+
+## Response
+
+<ResponseField name="code" type="integer">
+  HTTP status code (`200`)
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  `"success"`
+</ResponseField>
+
+<ResponseField name="data" type="array">
+  List of sport objects
+  <Expandable title="Sport Object">
+    <ResponseField name="sport_id" type="string">
+      Unique sport identifier
+    </ResponseField>
+    <ResponseField name="sport_name" type="string">
+      Human-readable sport name
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<RequestExample>
+```json Example Response
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "sport_id": "1",
+      "sport_name": "Football"
+    }
+  ]
+}
+```
+</RequestExample>

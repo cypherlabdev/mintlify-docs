@@ -1,0 +1,91 @@
+---
+title: "Get Match Streams"
+description: "Retrieve stream URLs for a match"
+api: "GET /matches/{id}/streams"
+playground: "simple"
+---
+
+Retrieve video stream URLs (HLS/FLV/RTMP) for a specific match.
+
+<Info>
+This is a dedicated endpoint for streams. It returns exactly the same `streams` array as `GET /matches/{id}?include=streams`, but without the core match fields.
+</Info>
+
+## Request
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  Unique match ID (e.g. `prov-60154495`)
+</ParamField>
+
+### Example Request
+
+```bash
+curl https://api.agg.example.com/v1/matches/prov-60154495/streams \
+  -H "Authorization: Bearer <access_token>"
+```
+
+---
+
+## Response
+
+<ResponseField name="code" type="integer">
+  HTTP status code (`200`)
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  `"success"`
+</ResponseField>
+
+<ResponseField name="match_id" type="string">
+  Raw match ID
+</ResponseField>
+
+<ResponseField name="data" type="array">
+  Array of stream objects
+  <Expandable title="Stream Object">
+    <ResponseField name="match_id" type="string">Match ID</ResponseField>
+    <ResponseField name="tag" type="string">Stream source tag</ResponseField>
+    <ResponseField name="vid" type="string">Unique video stream ID</ResponseField>
+    <ResponseField name="quality_id" type="integer">Quality tier</ResponseField>
+    <ResponseField name="language_id" type="integer">Language ID</ResponseField>
+    <ResponseField name="resolution" type="string">Video resolution</ResponseField>
+    <ResponseField name="preview_url" type="string">Preview thumbnail</ResponseField>
+    <ResponseField name="m3u8_url" type="string">HLS stream URL</ResponseField>
+    <ResponseField name="flv_url" type="string">FLV stream URL</ResponseField>
+    <ResponseField name="rtmp_url" type="string">RTMP stream URL</ResponseField>
+    <ResponseField name="has_video" type="boolean">Has video track</ResponseField>
+    <ResponseField name="has_audio" type="boolean">Has audio track</ResponseField>
+    <ResponseField name="is_live" type="boolean">Currently broadcasting</ResponseField>
+    <ResponseField name="signal_on" type="boolean">Signal active</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<RequestExample>
+```json Example Response
+{
+  "code": 200,
+  "message": "success",
+  "match_id": "60154495",
+  "data": [
+    {
+      "match_id": "60154495",
+      "tag": "stream-alpha",
+      "vid": "vid-60154495-streamNa-ali",
+      "quality_id": 1,
+      "language_id": 2,
+      "resolution": "1920x1080",
+      "preview_url": "https://img.agg.example.com/stream/preview.jpg",
+      "flv_url": "https://stream.agg.example.com/live/1080p.flv",
+      "m3u8_url": "https://stream.agg.example.com/live/1080p.m3u8",
+      "rtmp_url": "rtmp://stream.agg.example.com/live/1080p",
+      "has_video": true,
+      "has_audio": true,
+      "is_live": true,
+      "signal_on": true
+    }
+  ]
+}
+```
+</RequestExample>

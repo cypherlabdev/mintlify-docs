@@ -1,0 +1,311 @@
+---
+title: "Get Match Details"
+description: "Retrieve match details with selective section loading"
+api: "GET /matches/{id}"
+playground: "simple"
+---
+
+This endpoint supports **two modes** — choose based on what your page needs.
+
+---
+
+<Tabs>
+  <Tab title="Mode 1: Full Payload">
+    Returns **everything**. No extra parameters needed. Current behavior, backwards compatible.
+
+    ```http
+    GET /v1/matches/prov-60154495
+    ```
+
+    You get: core match info + streams + incidents + statistics + lineups + weather + insights
+
+    <Info>
+    Use this when you need the complete match payload in a single call (~40KB).
+    </Info>
+  </Tab>
+
+  <Tab title="Mode 2: Selective Payload">
+    Returns **core match info** (always) + **only the sections you ask for**. Omitted sections are excluded from the response entirely — not `null`, just absent.
+
+    ```http
+    GET /v1/matches/prov-60154495?include=statistics,incidents
+    ```
+
+    You get: core match info + statistics + incidents only
+
+    <Warning>
+    The `include` parameter accepts a comma-separated list. Only the listed sections are returned. Core fields are **always** included regardless.
+    </Warning>
+  </Tab>
+</Tabs>
+
+### Available Sections
+
+| `include` value | Response key | What you get | Status |
+|-----------------|-------------|--------------|--------|
+| `streams` | `streams` | Stream URLs (m3u8/flv/rtmp), resolution, signal status | Available |
+| `incidents` | `incidents` | Goals, cards, subs, VAR — each with score snapshot | Available |
+| `statistics` | `statistics` | Possession, shots, corners, fouls, offsides, attacks | Available |
+| `lineups` | `lineups` | Formation, starting XI, bench, coach per team | Available |
+| `weather` | `weather` | Condition, temperature, humidity, wind | Available |
+| `insights` | `insights` | H2H (last 5), form guide, league rankings, injuries | Available |
+
+<Info>
+Section availability is supported in the API contract. Data completeness can still vary per sport, league, match phase, and upstream coverage. If a section is unavailable for a specific match, it may return `null` or empty arrays.
+</Info>
+
+### Recommended FE Call Pattern
+
+```text
+Match list screen:
+  GET /matches                                              → match cards
+
+User taps match card:
+  GET /matches/{id}?include=streams,statistics,incidents,weather
+                                                            → match center + player
+
+User swipes to Lineup tab:
+  GET /matches/{id}?include=lineups                         → lazy-load lineups
+
+User swipes to Insights tab:
+  GET /matches/{id}?include=insights                        → lazy-load H2H/form
+```
+
+---
+
+## Request
+
+### Path Parameters
+
+<ParamField path="id" type="string" required>
+  Unique match ID (e.g. `prov-60154495`)
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="include" type="string">
+  Comma-separated list of sections to include. If omitted, all sections are returned. Values: `streams`, `incidents`, `statistics`, `lineups`, `weather`, `insights`.
+</ParamField>
+
+<ParamField query="exclude" type="string">
+  Comma-separated section names to omit (applied after `include`).
+</ParamField>
+
+<Info>
+Use `include` when possible for explicit contracts. Use `exclude` only as an optimization shortcut when your UI needs "almost everything except X".
+</Info>
+
+### Example Requests
+
+<CodeGroup>
+```bash Full Payload
+curl https://api.agg.example.com/v1/matches/prov-60154495 \
+  -H "Authorization: Bearer <access_token>"
+```
+
+```bash Stats & Events Only
+curl "https://api.agg.example.com/v1/matches/prov-60154495?include=statistics,incidents" \
+  -H "Authorization: Bearer <access_token>"
+```
+
+```bash Lineups Only
+curl "https://api.agg.example.com/v1/matches/prov-60154495?include=lineups" \
+  -H "Authorization: Bearer <access_token>"
+```
+
+```bash Everything Except Insights
+curl "https://api.agg.example.com/v1/matches/prov-60154495?exclude=insights" \
+  -H "Authorization: Bearer <access_token>"
+```
+</CodeGroup>
+
+---
+
+## Response
+
+<ResponseField name="code" type="integer">
+  HTTP status code (`200`)
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  `"success"`
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  The match object. Core fields are always present. Optional sections are present based on the `include` parameter.
+
+  <Expandable title="Core Fields (Always Returned)">
+    <ResponseField name="id" type="string">
+      Match ID (provider-prefixed)
+    </ResponseField>
+    <ResponseField name="match_id" type="string">
+      Raw match ID
+    </ResponseField>
+    <ResponseField name="sport_id" type="string">
+      Sport ID
+    </ResponseField>
+    <ResponseField name="sport_name" type="string">
+      Sport Name
+    </ResponseField>
+    <ResponseField name="league_id" type="string">
+      League ID
+    </ResponseField>
+    <ResponseField name="league_name" type="string">
+      League Name
+    </ResponseField>
+    <ResponseField name="home_team" type="string">
+      Home Team Name
+    </ResponseField>
+    <ResponseField name="away_team" type="string">
+      Away Team Name
+    </ResponseField>
+    <ResponseField name="home_logo" type="string">
+      Home Team Logo URL
+    </ResponseField>
+    <ResponseField name="away_logo" type="string">
+      Away Team Logo URL
+    </ResponseField>
+    <ResponseField name="home_score" type="integer">
+      Home Team Score (null before match start)
+    </ResponseField>
+    <ResponseField name="away_score" type="integer">
+      Away Team Score (null before match start)
+    </ResponseField>
+    <ResponseField name="status" type="string">
+      Match Status (`scheduled`, `live`, `completed`, etc.)
+    </ResponseField>
+    <ResponseField name="is_live" type="boolean">
+      Whether the match is currently in progress
+    </ResponseField>
+    <ResponseField name="start_time" type="string">
+      Scheduled start time (ISO 8601 UTC)
+    </ResponseField>
+    <ResponseField name="venue_name" type="string">
+      Venue Name
+    </ResponseField>
+    <ResponseField name="game_stage" type="string">
+      Current game stage
+    </ResponseField>
+  </Expandable>
+
+  <Expandable title="Optional: streams">
+    Array of stream objects.
+    <ResponseField name="match_id" type="string">Match ID</ResponseField>
+    <ResponseField name="tag" type="string">Stream source tag</ResponseField>
+    <ResponseField name="vid" type="string">Unique video stream ID</ResponseField>
+    <ResponseField name="quality_id" type="integer">Quality tier</ResponseField>
+    <ResponseField name="language_id" type="integer">Language ID</ResponseField>
+    <ResponseField name="resolution" type="string">Video resolution</ResponseField>
+    <ResponseField name="preview_url" type="string">Preview thumbnail</ResponseField>
+    <ResponseField name="m3u8_url" type="string">HLS stream URL</ResponseField>
+    <ResponseField name="flv_url" type="string">FLV stream URL</ResponseField>
+    <ResponseField name="rtmp_url" type="string">RTMP stream URL</ResponseField>
+    <ResponseField name="has_video" type="boolean">Has video track</ResponseField>
+    <ResponseField name="has_audio" type="boolean">Has audio track</ResponseField>
+    <ResponseField name="is_live" type="boolean">Currently broadcasting</ResponseField>
+    <ResponseField name="signal_on" type="boolean">Signal active</ResponseField>
+  </Expandable>
+
+  <Expandable title="Optional: incidents">
+    Array of match events.
+    <ResponseField name="type" type="string">Event type: `goal`, `own_goal`, `yellow_card`, `red_card`, `substitution`, `var_decision`, `penalty`</ResponseField>
+    <ResponseField name="minute" type="integer">Match minute</ResponseField>
+    <ResponseField name="second" type="integer">Second within minute</ResponseField>
+    <ResponseField name="team" type="string">`home` or `away`</ResponseField>
+    <ResponseField name="player_name" type="string">Player involved</ResponseField>
+    <ResponseField name="player_in" type="string">Player coming on (substitution only)</ResponseField>
+    <ResponseField name="player_out" type="string">Player going off (substitution only)</ResponseField>
+    <ResponseField name="var_reason" type="string">Reason for VAR review (var_decision only)</ResponseField>
+    <ResponseField name="var_result" type="string">Outcome of VAR review (var_decision only)</ResponseField>
+    <ResponseField name="score_snapshot" type="object">Score at time of incident (`{ "home": int, "away": int }`)</ResponseField>
+  </Expandable>
+
+  <Expandable title="Optional: statistics">
+    Match statistics. All values are objects containing `{ "home": int, "away": int }`.
+    <ResponseField name="possession" type="object">Ball possession % (home + away = 100)</ResponseField>
+    <ResponseField name="shots_on_target" type="object">Shots on target</ResponseField>
+    <ResponseField name="shots_off_target" type="object">Shots off target</ResponseField>
+    <ResponseField name="corners" type="object">Corner kicks</ResponseField>
+    <ResponseField name="yellow_cards" type="object">Yellow cards</ResponseField>
+    <ResponseField name="red_cards" type="object">Red cards</ResponseField>
+    <ResponseField name="dangerous_attacks" type="object">Dangerous attacks</ResponseField>
+    <ResponseField name="fouls" type="object">Fouls committed</ResponseField>
+    <ResponseField name="offsides" type="object">Offsides</ResponseField>
+    <ResponseField name="attacks" type="object">Total attacks</ResponseField>
+    <ResponseField name="free_kicks" type="object">Free kicks</ResponseField>
+  </Expandable>
+
+  <Expandable title="Optional: lineups">
+    Team lineups.
+    <ResponseField name="home" type="object">Home team lineup</ResponseField>
+    <ResponseField name="away" type="object">Away team lineup</ResponseField>
+    <ResponseField name="formation" type="string">Formation</ResponseField>
+    <ResponseField name="coach" type="string">Coach name</ResponseField>
+    <ResponseField name="starting" type="array">Starting XI (Player objects: `player_id`, `name`, `number`, `position`, `photo`, `rating`, `is_captain`)</ResponseField>
+    <ResponseField name="bench" type="array">Bench players (Player objects)</ResponseField>
+  </Expandable>
+
+  <Expandable title="Optional: weather">
+    Match weather conditions.
+    <ResponseField name="condition" type="string">Weather condition</ResponseField>
+    <ResponseField name="temperature" type="integer">Temperature (°C)</ResponseField>
+    <ResponseField name="humidity" type="integer">Humidity (%)</ResponseField>
+    <ResponseField name="wind_speed" type="integer">Wind speed (km/h)</ResponseField>
+    <ResponseField name="wind_direction" type="string">Wind direction</ResponseField>
+    <ResponseField name="pressure" type="integer">Pressure (hPa)</ResponseField>
+  </Expandable>
+
+  <Expandable title="Optional: insights">
+    Pre-match insights and form.
+    <ResponseField name="home_rank" type="integer">Home team league rank</ResponseField>
+    <ResponseField name="away_rank" type="integer">Away team league rank</ResponseField>
+    <ResponseField name="home_form" type="array">Last 5 results (W/D/L)</ResponseField>
+    <ResponseField name="away_form" type="array">Last 5 results (W/D/L)</ResponseField>
+    <ResponseField name="h2h" type="array">Last 5 H2H matches</ResponseField>
+    <ResponseField name="home_injuries" type="array">Home team injuries</ResponseField>
+    <ResponseField name="away_injuries" type="array">Away team injuries</ResponseField>
+  </Expandable>
+
+</ResponseField>
+
+<RequestExample>
+```json Example Selective Response
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "id": "prov-60154495",
+    "match_id": "60154495",
+    "sport_id": "1",
+    "sport_name": "Football",
+    "league_id": "11997",
+    "league_name": "Premier League",
+    "home_team": "Crystal Palace",
+    "away_team": "Fulham",
+    "home_logo": "https://img.agg.example.com/team/crystal-palace.png",
+    "away_logo": "https://img.agg.example.com/team/fulham.png",
+    "home_score": 2,
+    "away_score": 1,
+    "status": "live",
+    "is_live": true,
+    "start_time": "2026-02-18T15:00:00Z",
+    "venue_name": "Selhurst Park",
+    "game_stage": "2H",
+    "statistics": {
+      "possession": { "home": 58, "away": 42 },
+      "shots_on_target": { "home": 6, "away": 3 }
+    },
+    "incidents": [
+      {
+        "type": "goal",
+        "minute": 12,
+        "second": 34,
+        "team": "home",
+        "player_name": "Eberechi Eze",
+        "score_snapshot": { "home": 1, "away": 0 }
+      }
+    ]
+  }
+}
+```
+</RequestExample>

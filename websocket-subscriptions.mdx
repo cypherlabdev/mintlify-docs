@@ -1,0 +1,194 @@
+---
+title: "WebSocket Subscriptions"
+description: "How to subscribe to topics for real-time updates"
+---
+
+# WebSocket Subscriptions
+
+After authenticating your WebSocket connection, subscribe to topics to receive real-time data. AGG uses a colon-separated topic model with two granularity levels.
+
+## Topic Model
+
+| Topic Pattern | Granularity | Data | Use Case |
+|--------------|-------------|------|----------|
+| `match:{id}` | Single match | Full detail — scores, incidents, stats, stream status | Match detail page |
+| `matches:live` | All live matches | Lightweight — score changes, status changes, match added/removed | Live dashboard |
+| `matches:league:{id}` | League matches | Lightweight — same as above, scoped to one league | League view |
+| `matches:sport:{id}` | Sport matches | Lightweight — same as above, scoped to one sport | Sport overview |
+
+<Info>
+**Singular `match` vs plural `matches`:** The naming signals data granularity. `match:{id}` gives you everything for one match. `matches:*` gives you lightweight list updates for a group.
+</Info>
+
+## Instance Topics: `match:{id}`
+
+Subscribe to a specific match to receive **all event types** — scores, incidents (goals, cards, substitutions), statistics updates, and stream status changes.
+
+### Subscribe
+
+```json
+{
+  "type": "subscribe",
+  "topic": "match:prov-60154495"
+}
+```
+
+### Events You Receive
+
+```json
+{"type": "score_update", "home_score": 2, "away_score": 1, "timestamp": "2026-02-25T15:45:10Z"}
+```
+```json
+{"type": "incident", "data": {"type": "goal", "minute": 67, "player_name": "M. Salah", "team": "home"}, "timestamp": "2026-02-25T15:45:10Z"}
+```
+```json
+{"type": "statistics_update", "data": {"possession": {"home": 58, "away": 42}, "shots_on_target": {"home": 7, "away": 3}}, "timestamp": "2026-02-25T15:45:00Z"}
+```
+```json
+{"type": "stream_update", "data": {"stream_id": "s1", "is_live": true, "signal_on": true}, "timestamp": "2026-02-25T15:45:00Z"}
+```
+
+## Category Topics: `matches:*`
+
+Subscribe to a group of matches to receive **lightweight list updates** — score changes, status changes, and matches entering/leaving the group.
+
+### Subscribe
+
+```json
+{
+  "type": "subscribe",
+  "topic": "matches:live"
+}
+```
+
+```json
+{
+  "type": "subscribe",
+  "topic": "matches:league:39"
+}
+```
+
+```json
+{
+  "type": "subscribe",
+  "topic": "matches:sport:1"
+}
+```
+
+### Events You Receive
+
+```json
+{"type": "score_update", "match_id": "prov-60154495", "home_score": 2, "away_score": 1, "timestamp": "2026-02-25T15:45:10Z"}
+```
+```json
+{"type": "status_update", "match_id": "prov-60154495", "status": "live", "game_stage": "2H", "timestamp": "2026-02-25T15:15:00Z"}
+```
+```json
+{"type": "match_added", "match_id": "prov-60154800", "data": {"home_team": "Arsenal", "away_team": "Chelsea", "league_name": "Premier League", "status": "live"}, "timestamp": "2026-02-25T16:00:00Z"}
+```
+```json
+{"type": "match_removed", "match_id": "prov-60154495", "reason": "completed", "timestamp": "2026-02-25T16:45:00Z"}
+```
+
+<Warning>
+Category topics send lightweight payloads only — no incidents, statistics, or stream details. Subscribe to `match:{id}` when you need full event data for a specific match.
+</Warning>
+
+## Subscribe / Unsubscribe Messages
+
+### Subscribe
+
+```json
+{
+  "type": "subscribe",
+  "topic": "match:prov-60154495"
+}
+```
+
+### Subscribe Success
+
+```json
+{
+  "type": "subscribe_success",
+  "topic": "match:prov-60154495",
+  "message": "Subscribed to match:prov-60154495"
+}
+```
+
+### Subscribe Error
+
+```json
+{
+  "type": "subscribe_error",
+  "topic": "match:99999999",
+  "code": 404,
+  "message": "Match not found"
+}
+```
+
+### Unsubscribe
+
+```json
+{
+  "type": "unsubscribe",
+  "topic": "match:prov-60154495"
+}
+```
+
+### Unsubscribe Success
+
+```json
+{
+  "type": "unsubscribe_success",
+  "topic": "match:prov-60154495",
+  "message": "Unsubscribed from match:prov-60154495"
+}
+```
+
+## Subscription Limits
+
+- Maximum **100 active subscriptions** per WebSocket connection
+- Maximum **50 concurrent WebSocket connections** per merchant
+- Exceeding limits returns a `subscribe_error` with code `429`
+
+<Warning>
+Exceeding subscription limits will not disconnect you, but new subscriptions will be rejected until you unsubscribe from existing ones.
+</Warning>
+
+## Recommended Client Flow
+
+```
+1. REST  GET /matches?status=live               → render match list
+2. WS    subscribe "matches:live"               → keep list updated
+3. User clicks match prov-60154495
+4. REST  GET /matches/prov-60154495              → render match detail
+5. WS    subscribe "match:prov-60154495"        → get incidents, stats, stream changes
+6. User leaves match detail
+7. WS    unsubscribe "match:prov-60154495"      → clean up
+```
+
+## Cleanup Patterns
+
+Keep subscriptions tidy to stay within limits:
+
+- **On navigate away:** Unsubscribe from `match:{id}` when the user leaves a match detail page
+- **On match finish:** The server sends `match_removed` on category topics when a match completes — no action needed. For `match:{id}`, unsubscribe when you receive a `status_update` with `status: "completed"`
+- **On disconnect:** All subscriptions are automatically cleared — re-subscribe after reconnecting
+
+```javascript
+// Example: cleanup on match finish
+function handleEvent(msg) {
+  if (msg.type === 'status_update' && msg.status === 'completed') {
+    ws.send(JSON.stringify({ type: 'unsubscribe', topic: `match:${msg.match_id}` }));
+  }
+}
+
+// Example: cleanup on navigation
+function onLeaveMatchPage(matchId) {
+  ws.send(JSON.stringify({ type: 'unsubscribe', topic: `match:${matchId}` }));
+}
+```
+
+## Related Pages
+
+See [WebSocket Events](/websocket-events) for detailed event payloads per topic type.
